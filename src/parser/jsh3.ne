@@ -12,6 +12,7 @@ const lexer = moo.states({
 	rparen: ")",
 	lbracket: "[",
 	rbracket: "]",
+	nsright: { match: /[0-9]+>/, value: (s: string) => s.slice(0, -1) },
 	sright: ">",
 	sleft: "<",
 	and: "&&",
@@ -26,21 +27,21 @@ const lexer = moo.states({
 	jsstart: { match: "{", push: "js" },
 	variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
 	keyword: ["if", "for", "repeat", "while", "until", "do", "done", "fi"],
-	doublestring: { match: "\"", push: "doublestring" },
-	singlestring: { match: "'", push: "singlestring" },
+	doublestringstart: { match: "\"", push: "doublestringstart" },
+	singlestringstart: { match: "'", push: "singlestringstart" },
 	integer: /[0-9]+/,
 	identifier: /[a-zA-Z0-9_./]+/
     },
-    singlestring: {
+    singlestringstart: {
 	singleesc: /\\./,
-	singlecontent: /[^'\\\n]+/,
+	singlestring: /[^'\\\n]+/,
 	singlestringend: { match: "'", pop: true }
     },
-    doublestring: {
+    doublestringstart: {
 	doubleesc: /\\./,
 	variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
 	dollarvariable: { match: "${", push: "dollarvariable" },
-	doublecontent: /[^"$\\\n]+/,
+	doublestring: /[^"$\\\n]+/,
 	doublestringend: { match: "\"", pop: true }
     },
     dollarvariable: {
@@ -79,12 +80,19 @@ const lexer = moo.states({
 
 cmds -> cmd (_ %pipe _ cmds):* {% extractCmds %}
       | ifCondition
+      | whileCondition
 
-cmd -> exe (%whitespace arg):* {% extractCmd %}
+cmd -> (variableAssignment %whitespace):* exe (%whitespace arg):* redir {% extractCmd %}
 
 _ -> null | %whitespace {% function(d) { return null; } %}
 
-ifCondition -> "if" _ condition _ "then" _ cmd:* _ "fi"
+redirOut -> (%sright | %nsright) _ ((%amp %integer) | %identifier | %integer)
+redirIn -> %sleft _ (%identifier | %integer)
+redirs -> _ (redirIn | redirOut)
+redir -> null | redirs:+
+
+ifCondition -> "if" _ condition _ "then" _ cmd:* _ ("elif" _ condition _ "then" _ cmd:*):* _ ("else" _ cmd:*):* _ "fi" redir
+whileCondition -> "while" _ condition _ "do" _ cmd:* _ "done" redir
 jsCondition -> %jsstart _ jsblock:? _ %jsend
 cmdCondition -> %lparen _ cmd _ %rparen
 condition -> jsCondition
@@ -101,7 +109,7 @@ jsbackblock -> js
 	     | %jsbackcontent
 jsblock -> js
 	 | %jscode {% id %}
-	 | %jssinglestart jssingleblock:* %jssingleend {% extract1 %}
+	 | %jssinglestart jssingleblock:* %jssingleend
 	 | %jsdoublestart jsdoubleblock:* %jsdoubleend
 	 | %jsbackstart jsbackblock:* %jsbackend
 
@@ -109,19 +117,19 @@ key -> %identifier
      | %integer
 
 singleblock -> %singleesc
-	     | %singlecontent
+	     | %singlestring
 doubleblock -> %doubleesc
-	     | %doublecontent
+	     | %doublestring
 	     | %variable
 	     | %dollarvariable %variable %dollarvariableend
-singlestring -> %singlestring singleblock:* %singlestringend
-doublestring -> %doublestring doubleblock:* %doublestringend
+singlestring -> %singlestringstart singleblock:* %singlestringend
+doublestring -> %doublestringstart doubleblock:* %doublestringend
 
 value -> key
-       | singlestring
-       | doublestring
+       | singlestring {% id %}
+       | doublestring {% id %}
 
-variable -> key %eq value
+variableAssignment -> key %eq value
 
 exe -> %identifier
      | %integer
@@ -145,11 +153,39 @@ function extract1(d: any) {
 }
 
 function extractCmd(d: any) {
-    const o = [d[0][0]];
-    if (d[1] instanceof Array) {
-	for (let i = 0; i < d[1].length; ++i) {
-	    o.push(d[1][i][1][0]);
+    const o = [];
+    if (d[0] instanceof Array) {
+	const a = [];
+	for (let i = 0; i < d[0].length; ++i) {
+	    const v = d[0][i][0][2];
+	    a.push({ type: "assignment",
+		     key: d[0][i][0][0][0],
+		     value: v.length === 1 ? v[0][0] : v });
 	}
+	o.push(a);
+    }
+    const entries = [];
+    entries.push(d[1][0]);
+    if (d[2] instanceof Array) {
+	for (let i = 0; i < d[2].length; ++i) {
+	    entries.push(d[2][i][1][0]);
+	}
+    }
+    o.push({ type: "cmd", cmd: entries, redirs: extractRedirs(d[3]) });
+    return o;
+}
+
+function extractRedirs(d: any) {
+    if (!d.length)
+	return d;
+    const o = [];
+    for (let i = 0; i < d[0].length; ++i) {
+	const k = d[0][i][1][0][0];
+	if (k instanceof Array && k.length === 1)
+	    o.push(k[0]);
+	else
+	    o.push(k);
+	o.push(d[0][i][1][0][2][0]);
     }
     return o;
 }
@@ -158,7 +194,7 @@ function extractCmds(d: any) {
     const o = [d[0]];
     for (let i = 0; i < d[1].length; ++i) {
 	o.push(d[1][i][1]);
-	o.push(extractCmd([d[1][i][3]]));
+	o.push(extractCmd([d[1][i][3]])[0]);
     }
     return o;
 }
