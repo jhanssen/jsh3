@@ -12,8 +12,21 @@ jsh3Parser.feed("./hello && trall; semmm | foo > &1 | bar &!");
 //jsh3Parser.feed("./hello 1 2 | foo 3 4");
 console.log(JSON.stringify(jsh3Parser.results, null, 4));
 
+function processLines(lines: string[]) {
+    const promises: Promise<void>[] = [];
+    for (const line of lines) {
+        promises.push(Readline.addHistory(line));
+    }
+    Promise.all(promises).then(() => {
+        console.log("added history");
+    });
+}
+
 function processReadline(data: ReadlineData) {
-    console.log(data);
+    switch (data.type) {
+    case "lines":
+        processLines(data.lines || []);
+    }
 }
 
 Readline.start(processReadline);

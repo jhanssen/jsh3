@@ -36,15 +36,25 @@ struct State
     void saveState();
     void restoreState();
 
+    struct AsyncPromise
+    {
+        AsyncPromise(Napi::Promise::Deferred&& d, Napi::AsyncContext&& c)
+            : promise(std::move(d)), ctx(std::move(c))
+        {
+        }
+        Napi::Promise::Deferred promise;
+        Napi::AsyncContext ctx;
+    };
+
     struct TaskQuery
     {
-        std::unique_ptr<Napi::Promise::Deferred> promise;
+        std::unique_ptr<AsyncPromise> promise;
         Variant argument;
         std::function<Variant(const Variant&)> task;
     };
     struct TaskReply
     {
-        std::unique_ptr<Napi::Promise::Deferred> promise;
+        std::unique_ptr<AsyncPromise> promise;
         bool success;
         Variant value;
     };
@@ -55,6 +65,7 @@ struct State
     } tasks;
 
     void addTaskQuery(Napi::Promise::Deferred&& promise,
+                      Napi::AsyncContext&& ctx,
                       Variant&& argument,
                       std::function<Variant(const Variant&)>&& task);
 };
@@ -325,11 +336,12 @@ void State::run(void*)
 }
 
 void State::addTaskQuery(Napi::Promise::Deferred&& promise,
+                         Napi::AsyncContext&& ctx,
                          Variant&& argument,
                          std::function<Variant(const Variant&)>&& task)
 {
     state.tasks.queries.push({
-            std::make_unique<Napi::Promise::Deferred>(std::move(promise)),
+            std::make_unique<AsyncPromise>(std::move(promise), std::move(ctx)),
             std::move(argument),
             std::move(task)
         });
@@ -396,13 +408,14 @@ Napi::Value Start(const Napi::CallbackInfo& info)
             for (;;) {
                 if (!state.tasks.replies.pop(reply))
                     break;
-                auto env = reply.promise->Env();
+                auto env = reply.promise->promise.Env();
                 Napi::HandleScope scope(env);
+                Napi::CallbackScope callback(env, reply.promise->ctx);
 
                 if (reply.success) {
-                    reply.promise->Resolve(fromVariant(env, reply.value));
+                    reply.promise->promise.Resolve(fromVariant(env, reply.value));
                 } else {
-                    reply.promise->Reject(fromVariant(env, reply.value));
+                    reply.promise->promise.Reject(fromVariant(env, reply.value));
                 }
             }
         }
@@ -434,9 +447,21 @@ Napi::Value AddHistory(const Napi::CallbackInfo& info)
     const auto promise = deferred.Promise();
 
     state.addTaskQuery(std::move(deferred),
+                       Napi::AsyncContext(env, "addHistory"),
                        toVariant(info[0]),
                        [](const Variant& arg) -> Variant {
-                           printf("hello world\n");
+                           if (auto nstr = std::get_if<std::string>(&arg)) {
+                               auto cur = current_history();
+                               if (!cur) {
+                                   // last one?
+                                   cur = history_get(history_base + history_length - 1);
+                               }
+                               if (cur) {
+                                   if (!strcmp(nstr->c_str(), cur->line))
+                                       return Undefined;
+                               }
+                               add_history(nstr->c_str());
+                           }
                            return Undefined;
                        });
 
