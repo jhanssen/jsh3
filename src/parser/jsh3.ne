@@ -12,11 +12,12 @@ const lexer = moo.states({
 	rparen: ")",
 	lbracket: "[",
 	rbracket: "]",
-	nsright: { match: /[0-9]+>/, value: (s: string) => s.slice(0, -1) },
+	nsright: { match: /[0-9]+>/, value: (s: string) => parseInt(s) },
 	sright: ">",
 	sleft: "<",
 	and: "&&",
 	or: "||",
+	ampinteger: { match: /&[0-9+]+/, value: (s: string) => parseInt(s.slice(1)) },
 	amp: "&",
 	ex: "!",
 	eq: "=",
@@ -29,7 +30,7 @@ const lexer = moo.states({
 	keyword: ["if", "for", "repeat", "while", "until", "do", "done", "fi"],
 	doublestringstart: { match: "\"", push: "doublestringstart" },
 	singlestringstart: { match: "'", push: "singlestringstart" },
-	integer: /[0-9]+/,
+	integer: { match: /[0-9]+/, value: (s: string) => parseInt(s) },
 	identifier: /[a-zA-Z0-9_./]+/
     },
     singlestringstart: {
@@ -78,15 +79,20 @@ const lexer = moo.states({
 
 @lexer lexer
 
-cmds -> cmd (_ %pipe _ cmds):* {% extractCmds %}
+cmds -> cmdpipe _ amp ex {% extractCmdPipes %}
       | ifCondition
       | whileCondition
+
+cmdpipe -> cmd (_ %pipe _ cmd):*
+
+amp -> null | %amp
+ex -> null | %ex
 
 cmd -> (variableAssignment %whitespace):* exe (%whitespace arg):* redir {% extractCmd %}
 
 _ -> null | %whitespace {% function(d) { return null; } %}
 
-redirOut -> (%sright | %nsright) _ ((%amp %integer) | %identifier | %integer)
+redirOut -> (%sright | %nsright) _ (%ampinteger | %identifier | %integer)
 redirIn -> %sleft _ (%identifier | %integer)
 redirs -> _ (redirIn | redirOut)
 redir -> null | redirs:+
@@ -190,12 +196,18 @@ function extractRedirs(d: any) {
     return o;
 }
 
-function extractCmds(d: any) {
-    const o = [d[0]];
-    for (let i = 0; i < d[1].length; ++i) {
-	o.push(d[1][i][1]);
-	o.push(extractCmd([d[1][i][3]])[0]);
+function extractCmdPipes(d: any) {
+    const o = [d[0][0]];
+    if (d[0][1] instanceof Array) {
+	for (let i = 0; i < d[0][1].length; ++i) {
+	    o.push(d[0][1][i][1]);
+	    o.push(d[0][1][i][3]);
+	}
     }
+    if (d[2] instanceof Array && d[2].length === 1)
+	o.push(d[2][0]);
+    if (d[3] instanceof Array && d[3].length === 1)
+	o.push(d[3][0]);
     return o;
 }
 
