@@ -79,12 +79,16 @@ const lexer = moo.states({
 
 @lexer lexer
 
-cmds -> cmdpipe _ amp ex {% extractCmdPipes %}
+cmds -> cmdamp
       | ifCondition
       | whileCondition
 
-cmdpipe -> cmd (_ %pipe _ cmd):*
+cmdamp -> cmdsemi _ amp ex {% extractCmdAmp %}
+cmdsemi -> cmdpipe (_ %semi _ cmdpipe):* {% extractCmdSemi %}
+cmdpipe -> cmdlogical (_ %pipe _ cmdlogical):* {% extractCmdPipe %}
+cmdlogical -> cmd (_ logical _ cmd):* {% extractCmdLogical %}
 
+logical -> %and | %or
 amp -> null | %amp
 ex -> null | %ex
 
@@ -196,14 +200,39 @@ function extractRedirs(d: any) {
     return o;
 }
 
-function extractCmdPipes(d: any) {
-    const o = [d[0][0]];
-    if (d[0][1] instanceof Array) {
-	for (let i = 0; i < d[0][1].length; ++i) {
-	    o.push(d[0][1][i][1]);
-	    o.push(d[0][1][i][3]);
+function extractCmdSemi(d: any) {
+    const entries = [d[0]];
+    if (d[1] instanceof Array) {
+        for (let i = 0; i < d[1].length; ++i) {
+            entries.push(d[1][i][3]);
 	}
     }
+    return { type: "semi", semi: entries };
+}
+
+function extractCmdLogical(d: any) {
+    const entries = [d[0]];
+    if (d[1] instanceof Array) {
+        for (let i = 0; i < d[1].length; ++i) {
+            entries.push(d[1][i][1][0]);
+            entries.push(d[1][i][3]);
+	}
+    }
+    return { type: "logical", logical: entries };
+}
+
+function extractCmdPipe(d: any) {
+    const entries = [d[0]];
+    if (d[1] instanceof Array) {
+        for (let i = 0; i < d[1].length; ++i) {
+            entries.push(d[1][i][3]);
+	}
+    }
+    return { type: "pipe", pipe: entries };
+}
+
+function extractCmdAmp(d: any) {
+    const o = [d[0]];
     if (d[2] instanceof Array && d[2].length === 1)
 	o.push(d[2][0]);
     if (d[3] instanceof Array && d[3].length === 1)
