@@ -1,5 +1,6 @@
 import * as nearley from "nearley"
 import { jsh3_grammar } from "./parser"
+import { default as Readline, Data as ReadlineData } from "../native/readline";
 
 const jsh3Parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
 
@@ -10,3 +11,9 @@ jsh3Parser.feed("./hello && trall; semmm | foo > &1 | bar &!");
 //jsh3Parser.feed("./hello foo");
 //jsh3Parser.feed("./hello 1 2 | foo 3 4");
 console.log(JSON.stringify(jsh3Parser.results, null, 4));
+
+function processReadline(data: ReadlineData) {
+    console.log(data);
+}
+
+Readline.start(processReadline);

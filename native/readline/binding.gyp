@@ -14,10 +14,13 @@
 	],
 	"sources": [
 	    "../cppsrc/readline.cc",
+	    "../cppsrc/utils.cc",
+	    "../cppsrc/Redirector.cc",
 	],
 	'include_dirs': [
+	    "../cppsrc",
 	    "<!@(node -p \"require('node-addon-api').include\")",
-	    "<!@(PKG_CONFIG_PATH=/usr/local/opt/readline/lib/pkgconfig pkg-config readline --cflags-only-I | sed s/-I//g)",
+	    "<!@(PKG_CONFIG_PATH=/usr/local/opt/readline/lib/pkgconfig pkg-config readline --cflags-only-I | sed s/-I//g | sed s/readline$//g)",
 	],
 	'libraries': [
 	    "<!@(PKG_CONFIG_PATH=/usr/local/opt/readline/lib/pkgconfig pkg-config readline --libs)",
