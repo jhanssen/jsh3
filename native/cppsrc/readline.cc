@@ -459,6 +459,7 @@ Napi::Value AddHistory(const Napi::CallbackInfo& info)
                                               return Undefined;
                                       }
                                       add_history(nstr->c_str());
+                                      history_set_pos(history_length);
                                   }
                                   return Undefined;
                               });
