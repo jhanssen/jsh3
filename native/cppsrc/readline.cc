@@ -455,7 +455,7 @@ Napi::Value AddHistory(const Napi::CallbackInfo& info)
     if (!info[0].IsString()) {
         throw Napi::TypeError::New(env, "First argument needs to be a string");
     }
-    const bool write = info[0].IsBoolean() ? info[0].As<Napi::Boolean>().Value() : false;
+    const bool write = info[1].IsBoolean() ? info[1].As<Napi::Boolean>().Value() : false;
 
     return state.runTask(env, info[0],
                          [write](const Variant& arg) -> Variant {

@@ -37,5 +37,5 @@ function processReadline(data: ReadlineData) {
 
 Readline.start(processReadline);
 Readline.readHistory(pathJoin(homedir(), ".jsh_history")).then(() => {
-    console.log("history loaded");
+    console.log("history loaded", pathJoin(homedir(), ".jsh_history"));
 });
