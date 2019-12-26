@@ -5,73 +5,73 @@ const moo = require("moo");
 
 const lexer = moo.states({
     main: {
-	whitespace: { match: /[ \t]+/, lineBreaks: true },
-	dollarlparen: "$(",
-	dollarvariable: { match: "${", push: "dollarvariable" },
-	lparen: "(",
-	rparen: ")",
-	lbracket: "[",
-	rbracket: "]",
-	nsright: { match: /[0-9]+>/, value: (s: string) => parseInt(s) },
-	sright: ">",
-	sleft: "<",
-	and: "&&",
-	or: "||",
-	ampinteger: { match: /&[0-9+]+/, value: (s: string) => parseInt(s.slice(1)) },
-	amp: "&",
-	ex: "!",
-	eq: "=",
-	semi: ";",
-	pipe: "|",
-	star: "*",
-	slash: "/",
-	jsstart: { match: "{", push: "js" },
-	variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
-	keyword: ["if", "for", "repeat", "while", "until", "do", "done", "fi"],
-	doublestringstart: { match: "\"", push: "doublestringstart" },
-	singlestringstart: { match: "'", push: "singlestringstart" },
-	integer: { match: /[0-9]+/, value: (s: string) => parseInt(s) },
-	identifier: /[a-zA-Z0-9_./]+/
+        whitespace: { match: /[ \t]+/, lineBreaks: true },
+        dollarlparen: "$(",
+        dollarvariable: { match: "${", push: "dollarvariable" },
+        lparen: "(",
+        rparen: ")",
+        lbracket: "[",
+        rbracket: "]",
+        nsright: { match: /[0-9]+>/, value: (s: string) => parseInt(s) },
+        sright: ">",
+        sleft: "<",
+        and: "&&",
+        or: "||",
+        ampinteger: { match: /&[0-9+]+/, value: (s: string) => parseInt(s.slice(1)) },
+        amp: "&",
+        ex: "!",
+        eq: "=",
+        semi: ";",
+        pipe: "|",
+        star: "*",
+        slash: "/",
+        jsstart: { match: "{", push: "js" },
+        variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
+        keyword: [/if\b/, /for\b/, /repeat\b/, /while\b/, /until\b/, /do\b/, /done\b/, /fi\b/],
+        doublestringstart: { match: "\"", push: "doublestringstart" },
+        singlestringstart: { match: "'", push: "singlestringstart" },
+        integer: { match: /[0-9]+/, value: (s: string) => parseInt(s) },
+        identifier: /[a-zA-Z0-9_./]+/
     },
     singlestringstart: {
-	singleesc: /\\./,
-	singlestring: /[^'\\\n]+/,
-	singlestringend: { match: "'", pop: true }
+        singleesc: /\\./,
+        singlestring: /[^'\\\n]+/,
+        singlestringend: { match: "'", pop: true }
     },
     doublestringstart: {
-	doubleesc: /\\./,
-	variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
-	dollarvariable: { match: "${", push: "dollarvariable" },
-	doublestring: /[^"$\\\n]+/,
-	doublestringend: { match: "\"", pop: true }
+        doubleesc: /\\./,
+        variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
+        dollarvariable: { match: "${", push: "dollarvariable" },
+        doublestring: /[^"$\\\n]+/,
+        doublestringend: { match: "\"", pop: true }
     },
     dollarvariable: {
-	variable: { match: /[^}\n]+/ },
-	dollarvariableend: { match: "}", pop: true }
+        variable: { match: /[^}\n]+/ },
+        dollarvariableend: { match: "}", pop: true }
     },
     js: {
-	jssinglestart: { match: "'", push: "jssinglestart" },
-	jsdoublestart: { match: "\"", push: "jsdoublestart" },
-	jsbackstart: { match: "`", push: "jsbackstart" },
-	jsstart: { match: "{", push: "js" },
-	jsend: { match: "}", pop: true },
-	jscode: { match: /[^'"`{}]+/, lineBreaks: true }
+        jssinglestart: { match: "'", push: "jssinglestart" },
+        jsdoublestart: { match: "\"", push: "jsdoublestart" },
+        jsbackstart: { match: "`", push: "jsbackstart" },
+        jsstart: { match: "{", push: "js" },
+        jsend: { match: "}", pop: true },
+        jscode: { match: /[^'"`{}]+/, lineBreaks: true }
     },
     jssinglestart: {
-	jssingleesc: /\\./,
-	jssingleend: { match: "'", pop: true },
-	jssinglecontent: /[^'\\\n]+/
+        jssingleesc: /\\./,
+        jssingleend: { match: "'", pop: true },
+        jssinglecontent: /[^'\\\n]+/
     },
     jsdoublestart: {
-	jsdoubleesc: /\\./,
-	jsdoubleend: { match: "\"", pop: true },
-	jsdoublecontent: /[^"\\\n]+/
+        jsdoubleesc: /\\./,
+        jsdoubleend: { match: "\"", pop: true },
+        jsdoublecontent: /[^"\\\n]+/
     },
     jsbackstart: {
-	jsbackesc: /\\./,
-	jsbackend: { match: "`", pop: true },
-	jsstart: { match: "${", push: "js" },
-	jsbackcontent: { match: /^(?:(?!(?:`|\${|\\)).)+/, lineBreaks: true }
+        jsbackesc: /\\./,
+        jsbackend: { match: "`", pop: true },
+        jsstart: { match: "${", push: "js" },
+        jsbackcontent: { match: /^(?:(?!(?:`|\${|\\)).)+/, lineBreaks: true }
     }
 });
 
@@ -106,32 +106,32 @@ whileCondition -> "while" _ condition _ "do" _ cmd:* _ "done" redir
 jsCondition -> %jsstart _ jsblock:? _ %jsend
 cmdCondition -> %lparen _ cmd _ %rparen
 condition -> jsCondition
-	   | cmdCondition
+           | cmdCondition
 
 js -> %jsstart _ jsblock:* _ %jsend {% extract024 %}
 
 jssingleblock -> %jssingleesc
-	       | %jssinglecontent
+               | %jssinglecontent
 jsdoubleblock -> %jsdoubleesc
-	       | %jsdoublecontent
+               | %jsdoublecontent
 jsbackblock -> js
-	     | %jsbackesc
-	     | %jsbackcontent
+             | %jsbackesc
+             | %jsbackcontent
 jsblock -> js
-	 | %jscode {% id %}
-	 | %jssinglestart jssingleblock:* %jssingleend
-	 | %jsdoublestart jsdoubleblock:* %jsdoubleend
-	 | %jsbackstart jsbackblock:* %jsbackend
+         | %jscode {% id %}
+         | %jssinglestart jssingleblock:* %jssingleend
+         | %jsdoublestart jsdoubleblock:* %jsdoubleend
+         | %jsbackstart jsbackblock:* %jsbackend
 
 key -> %identifier
      | %integer
 
 singleblock -> %singleesc
-	     | %singlestring
+             | %singlestring
 doubleblock -> %doubleesc
-	     | %doublestring
-	     | %variable
-	     | %dollarvariable %variable %dollarvariableend
+             | %doublestring
+             | %variable
+             | %dollarvariable %variable %dollarvariableend
 singlestring -> %singlestringstart singleblock:* %singlestringend
 doublestring -> %doublestringstart doubleblock:* %doublestringend
 
@@ -165,21 +165,21 @@ function extract1(d: any) {
 function extractCmd(d: any) {
     const o = [];
     if (d[0] instanceof Array) {
-	const a = [];
-	for (let i = 0; i < d[0].length; ++i) {
-	    const v = d[0][i][0][2];
-	    a.push({ type: "assignment",
-		     key: d[0][i][0][0][0],
-		     value: v.length === 1 ? v[0][0] : v });
-	}
-	o.push(a);
+        const a = [];
+        for (let i = 0; i < d[0].length; ++i) {
+            const v = d[0][i][0][2];
+            a.push({ type: "assignment",
+                     key: d[0][i][0][0][0],
+                     value: v.length === 1 ? v[0][0] : v });
+        }
+        o.push(a);
     }
     const entries = [];
     entries.push(d[1][0]);
     if (d[2] instanceof Array) {
-	for (let i = 0; i < d[2].length; ++i) {
-	    entries.push(d[2][i][1][0]);
-	}
+        for (let i = 0; i < d[2].length; ++i) {
+            entries.push(d[2][i][1][0]);
+        }
     }
     o.push({ type: "cmd", cmd: entries, redirs: extractRedirs(d[3]) });
     return o;
@@ -187,15 +187,15 @@ function extractCmd(d: any) {
 
 function extractRedirs(d: any) {
     if (!d.length)
-	return d;
+        return d;
     const o = [];
     for (let i = 0; i < d[0].length; ++i) {
-	const k = d[0][i][1][0][0];
-	if (k instanceof Array && k.length === 1)
-	    o.push(k[0]);
-	else
-	    o.push(k);
-	o.push(d[0][i][1][0][2][0]);
+        const k = d[0][i][1][0][0];
+        if (k instanceof Array && k.length === 1)
+            o.push(k[0]);
+        else
+            o.push(k);
+        o.push(d[0][i][1][0][2][0]);
     }
     return o;
 }
@@ -205,7 +205,7 @@ function extractCmdSemi(d: any) {
     if (d[1] instanceof Array) {
         for (let i = 0; i < d[1].length; ++i) {
             entries.push(d[1][i][3]);
-	}
+        }
     }
     return { type: "semi", semi: entries };
 }
@@ -216,7 +216,7 @@ function extractCmdLogical(d: any) {
         for (let i = 0; i < d[1].length; ++i) {
             entries.push(d[1][i][1][0]);
             entries.push(d[1][i][3]);
-	}
+        }
     }
     return { type: "logical", logical: entries };
 }
@@ -226,7 +226,7 @@ function extractCmdPipe(d: any) {
     if (d[1] instanceof Array) {
         for (let i = 0; i < d[1].length; ++i) {
             entries.push(d[1][i][3]);
-	}
+        }
     }
     return { type: "pipe", pipe: entries };
 }
