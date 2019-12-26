@@ -1,6 +1,7 @@
 #include "Redirector.h"
 #include "utils.h"
 #include <memory>
+#include <string>
 #include <napi.h>
 #include <uv.h>
 #include <sys/ioctl.h>
@@ -18,6 +19,7 @@ struct State
     bool stopped { false };
     Napi::FunctionReference callback;
     std::unique_ptr<Napi::AsyncContext> ctx;
+    std::string historyFile;
 
     enum class WakeupReason { Stop, Task };
     void wakeup(WakeupReason reason);
@@ -64,8 +66,8 @@ struct State
         Queue<TaskReply> replies;
     } tasks;
 
-    Napi::Promise addTaskQuery(Napi::Env& env, const Napi::Value& argument,
-                               std::function<Variant(const Variant&)>&& task);
+    Napi::Promise runTask(Napi::Env& env, const Napi::Value& argument,
+                          std::function<Variant(const Variant&)>&& task);
 };
 
 static State state;
@@ -335,13 +337,13 @@ void State::run(void*)
     }
 }
 
-Napi::Promise State::addTaskQuery(Napi::Env& env,
-                                  const Napi::Value& arg,
-                                  std::function<Variant(const Variant&)>&& task)
+Napi::Promise State::runTask(Napi::Env& env,
+                             const Napi::Value& arg,
+                             std::function<Variant(const Variant&)>&& task)
 {
     auto deferred = Napi::Promise::Deferred::New(env);
     auto promise = deferred.Promise();
-    Napi::AsyncContext ctx(env, "addTaskQuery");
+    Napi::AsyncContext ctx(env, "runTask");
     state.tasks.queries.push({
             std::make_unique<AsyncPromise>(std::move(deferred), std::move(ctx)),
             toVariant(arg),
@@ -405,7 +407,11 @@ Napi::Value Start(const Napi::CallbackInfo& info)
             obj.Set("type", "lines");
             obj.Set("lines", lines);
 
-            state.callback.MakeCallback(state.callback.Value(), { obj }, *state.ctx);
+            try {
+                state.callback.MakeCallback(state.callback.Value(), { obj }, *state.ctx);
+            } catch (const Napi::Error& e) {
+                printf("line callback: exception from js: %s\n%s\n", e.what(), e.Message().c_str());
+            }
         } else if (async == &state.tasks.async) {
             State::TaskReply reply;
             for (;;) {
@@ -415,10 +421,14 @@ Napi::Value Start(const Napi::CallbackInfo& info)
                 Napi::HandleScope scope(env);
                 Napi::CallbackScope callback(env, reply.promise->ctx);
 
-                if (reply.success) {
-                    reply.promise->promise.Resolve(fromVariant(env, reply.value));
-                } else {
-                    reply.promise->promise.Reject(fromVariant(env, reply.value));
+                try {
+                    if (reply.success) {
+                        reply.promise->promise.Resolve(fromVariant(env, reply.value));
+                    } else {
+                        reply.promise->promise.Reject(fromVariant(env, reply.value));
+                    }
+                } catch (const Napi::Error& e) {
+                    printf("promise callback: exception from js: %s\n%s\n", e.what(), e.Message().c_str());
                 }
             }
         }
@@ -445,24 +455,66 @@ Napi::Value AddHistory(const Napi::CallbackInfo& info)
     if (!info[0].IsString()) {
         throw Napi::TypeError::New(env, "First argument needs to be a string");
     }
+    const bool write = info[0].IsBoolean() ? info[0].As<Napi::Boolean>().Value() : false;
 
-    return state.addTaskQuery(env, info[0],
-                              [](const Variant& arg) -> Variant {
-                                  if (auto nstr = std::get_if<std::string>(&arg)) {
-                                      auto cur = current_history();
-                                      if (!cur) {
-                                          // last one?
-                                          cur = history_get(history_base + history_length - 1);
-                                      }
-                                      if (cur) {
-                                          if (!strcmp(nstr->c_str(), cur->line))
-                                              return Undefined;
-                                      }
-                                      add_history(nstr->c_str());
-                                      history_set_pos(history_length);
-                                  }
-                                  return Undefined;
-                              });
+    return state.runTask(env, info[0],
+                         [write](const Variant& arg) -> Variant {
+                             if (auto nstr = std::get_if<std::string>(&arg)) {
+                                 auto cur = current_history();
+                                 if (!cur) {
+                                     // last one?
+                                     cur = history_get(history_base + history_length - 1);
+                                 }
+                                 if (cur) {
+                                     if (!strcmp(nstr->c_str(), cur->line))
+                                         return Undefined;
+                                 }
+                                 add_history(nstr->c_str());
+                                 history_set_pos(history_length);
+                                 if (write && !state.historyFile.empty())
+                                     write_history(state.historyFile.c_str());
+                             }
+                             return Undefined;
+                         });
+}
+
+Napi::Value ReadHistory(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    if (!info[0].IsString()) {
+        throw Napi::TypeError::New(env, "First argument needs to be a string");
+    }
+
+    return state.runTask(env, info[0],
+                         [](const Variant& arg) -> Variant {
+                             if (auto nstr = std::get_if<std::string>(&arg)) {
+                                 state.historyFile = *nstr;
+                                 const int ret = read_history(nstr->c_str());
+                                 if (!ret) {
+                                     using_history();
+                                 }
+                             }
+                             return Undefined;
+                         });
+}
+
+Napi::Value WriteHistory(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    if (!info[0].IsString()) {
+        throw Napi::TypeError::New(env, "First argument needs to be a string");
+    }
+
+    return state.runTask(env, info[0],
+                         [](const Variant& arg) -> Variant {
+                             if (auto nstr = std::get_if<std::string>(&arg)) {
+                                 state.historyFile = *nstr;
+                                 write_history(nstr->c_str());
+                             }
+                             return Undefined;
+                         });
 }
 
 Napi::Object Setup(Napi::Env env, Napi::Object exports)
@@ -470,6 +522,8 @@ Napi::Object Setup(Napi::Env env, Napi::Object exports)
     exports.Set("start", Napi::Function::New(env, Start));
     exports.Set("stop", Napi::Function::New(env, Stop));
     exports.Set("addHistory", Napi::Function::New(env, AddHistory));
+    exports.Set("readHistory", Napi::Function::New(env, ReadHistory));
+    exports.Set("writeHistory", Napi::Function::New(env, WriteHistory));
     return exports;
 }
 
