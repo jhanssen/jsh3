@@ -64,10 +64,8 @@ struct State
         Queue<TaskReply> replies;
     } tasks;
 
-    void addTaskQuery(Napi::Promise::Deferred&& promise,
-                      Napi::AsyncContext&& ctx,
-                      Variant&& argument,
-                      std::function<Variant(const Variant&)>&& task);
+    Napi::Promise addTaskQuery(Napi::Env& env, const Napi::Value& argument,
+                               std::function<Variant(const Variant&)>&& task);
 };
 
 static State state;
@@ -335,17 +333,20 @@ void State::run(void*)
     }
 }
 
-void State::addTaskQuery(Napi::Promise::Deferred&& promise,
-                         Napi::AsyncContext&& ctx,
-                         Variant&& argument,
-                         std::function<Variant(const Variant&)>&& task)
+Napi::Promise State::addTaskQuery(Napi::Env& env,
+                                  const Napi::Value& arg,
+                                  std::function<Variant(const Variant&)>&& task)
 {
+    auto deferred = Napi::Promise::Deferred::New(env);
+    auto promise = deferred.Promise();
+    Napi::AsyncContext ctx(env, "addTaskQuery");
     state.tasks.queries.push({
-            std::make_unique<AsyncPromise>(std::move(promise), std::move(ctx)),
-            std::move(argument),
+            std::make_unique<AsyncPromise>(std::move(deferred), std::move(ctx)),
+            toVariant(arg),
             std::move(task)
         });
     state.wakeup(WakeupReason::Task);
+    return promise;
 }
 
 Napi::Value Start(const Napi::CallbackInfo& info)
@@ -443,29 +444,22 @@ Napi::Value AddHistory(const Napi::CallbackInfo& info)
         throw Napi::TypeError::New(env, "First argument needs to be a string");
     }
 
-    auto deferred = Napi::Promise::Deferred::New(env);
-    const auto promise = deferred.Promise();
-
-    state.addTaskQuery(std::move(deferred),
-                       Napi::AsyncContext(env, "addHistory"),
-                       toVariant(info[0]),
-                       [](const Variant& arg) -> Variant {
-                           if (auto nstr = std::get_if<std::string>(&arg)) {
-                               auto cur = current_history();
-                               if (!cur) {
-                                   // last one?
-                                   cur = history_get(history_base + history_length - 1);
-                               }
-                               if (cur) {
-                                   if (!strcmp(nstr->c_str(), cur->line))
-                                       return Undefined;
-                               }
-                               add_history(nstr->c_str());
-                           }
-                           return Undefined;
-                       });
-
-    return promise;
+    return state.addTaskQuery(env, info[0],
+                              [](const Variant& arg) -> Variant {
+                                  if (auto nstr = std::get_if<std::string>(&arg)) {
+                                      auto cur = current_history();
+                                      if (!cur) {
+                                          // last one?
+                                          cur = history_get(history_base + history_length - 1);
+                                      }
+                                      if (cur) {
+                                          if (!strcmp(nstr->c_str(), cur->line))
+                                              return Undefined;
+                                      }
+                                      add_history(nstr->c_str());
+                                  }
+                                  return Undefined;
+                              });
 }
 
 Napi::Object Setup(Napi::Env env, Napi::Object exports)
