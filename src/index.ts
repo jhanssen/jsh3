@@ -1,6 +1,8 @@
 import * as nearley from "nearley"
 import { jsh3_grammar } from "./parser"
 import { default as Readline, Data as ReadlineData } from "../native/readline";
+import { join as pathJoin } from "path";
+import { homedir } from "os";
 
 const jsh3Parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
 
@@ -30,3 +32,6 @@ function processReadline(data: ReadlineData) {
 }
 
 Readline.start(processReadline);
+Readline.readHistory(pathJoin(homedir(), ".jsh_history")).then(() => {
+    console.log("history loaded");
+});
