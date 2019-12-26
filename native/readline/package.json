@@ -5,6 +5,7 @@
    "main": "index.js",
    "gypfile": true,
    "scripts": {
+      "preinstall": "./preinstall.sh",
       "build": "node-gyp rebuild",
       "build:debug": "node-gyp --debug rebuild",
       "commands": "node-gyp configure -- -f compile_commands_json",

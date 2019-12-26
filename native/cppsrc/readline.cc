@@ -255,6 +255,8 @@ void State::run(void*)
 
     rl_callback_handler_install("pr> ", handler);
 
+    using_history();
+
     fd_set rdset;
 
     const int stdoutfd = state.redirector.stdout();
