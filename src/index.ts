@@ -17,7 +17,11 @@ console.log(JSON.stringify(jsh3Parser.results, null, 4));
 function processLines(lines: string[]) {
     const promises: Promise<void>[] = [];
     for (const line of lines) {
-        promises.push(Readline.addHistory(line));
+        promises.push(Readline.addHistory(line, true));
+
+        const parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
+        parser.feed(line);
+        console.log(JSON.stringify(parser.results, null, 4));
     }
     Promise.all(promises).then(() => {
         console.log("added history");
