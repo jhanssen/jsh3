@@ -2,6 +2,7 @@
 #include <mutex>
 #include <thread>
 #include <string>
+#include <deque>
 #include <vector>
 #include <memory>
 #include <napi.h>
@@ -54,8 +55,20 @@ struct Process
     pid_t pid;
     int status { -1 };
     bool running { false };
+    bool needsWrite { false };
+    bool pendingClose { false };
 
     std::unique_ptr<AsyncPromise> promise;
+
+    struct Writer
+    {
+        std::weak_ptr<Process> process;
+    };
+
+    std::shared_ptr<Writer> writer;
+    std::vector<std::string> newPendingWrite;
+    std::deque<std::string> pendingWrite;
+    size_t pendingOffset { 0 };
 };
 
 struct Reader
@@ -90,7 +103,7 @@ Reader::Reader()
 void Reader::add(const std::shared_ptr<Process>& proc)
 {
     int e;
-    char c = 'n';
+    char c = 'a';
     std::unique_lock<std::mutex> locker(mutex);
     newprocs.push_back(proc);
     EINTRWRAP(e, ::write(wakeuppipe[1], &c, 1));
@@ -113,6 +126,45 @@ static void handleRead(int* fd, const std::shared_ptr<BufferEmitter>& emitter)
                 break;
             EINTRWRAP(e, ::close(nfd));
             *fd = -1;
+        }
+    }
+}
+
+static void handleWrite(Process* proc)
+{
+    if (proc->stdin == -1) {
+        proc->pendingWrite.clear();
+        return;
+    }
+
+    int e;
+    while (!proc->pendingWrite.empty()) {
+        const auto& str = proc->pendingWrite.front();
+        EINTRWRAP(e, ::write(proc->stdin, &str[0] + proc->pendingOffset, str.size() - proc->pendingOffset));
+        if (e > 0) {
+            proc->pendingOffset += e;
+            if (proc->pendingOffset == str.size()) {
+                proc->pendingOffset = 0;
+                proc->pendingWrite.pop_front();
+            }
+        } else if (e < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                proc->needsWrite = true;
+            } else {
+                // badness has occurred
+                EINTRWRAP(e, ::close(proc->stdin));
+                proc->stdin = -1;
+            }
+            return;
+        }
+    }
+
+    if (proc->pendingWrite.empty()) {
+        std::unique_lock<std::mutex> locker(reader.mutex);
+        if (proc->pendingClose) {
+            proc->pendingClose = false;
+            EINTRWRAP(e, ::close(proc->stdin));
+            proc->stdin = -1;
         }
     }
 }
@@ -195,10 +247,12 @@ void Reader::start(const Napi::Env& env)
 
     thread = std::thread([this]() {
                  fd_set rdfds;
+                 fd_set wrfds;
                  const int pmax = std::max(wakeuppipe[0], sigpipe[0]);
                  int e;
                  for (;;) {
                      FD_ZERO(&rdfds);
+                     FD_ZERO(&wrfds);
                      FD_SET(wakeuppipe[0], &rdfds);
                      FD_SET(sigpipe[0], &rdfds);
 
@@ -231,9 +285,21 @@ void Reader::start(const Napi::Env& env)
                              if (proc->stderr > max)
                                  max = proc->stderr;
                          }
+                         {
+                             std::unique_lock<std::mutex> locker(mutex);
+                             if (!proc->newPendingWrite.empty()) {
+                                 std::move(std::begin(proc->newPendingWrite), std::end(proc->newPendingWrite), std::back_inserter(proc->pendingWrite));
+                             }
+                         }
+                         if (!proc->pendingWrite.empty() && !proc->needsWrite) {
+                             handleWrite(proc.get());
+                         }
+                         if (proc->stdin != -1 && proc->needsWrite) {
+                             FD_SET(proc->stdin, &wrfds);
+                         }
                      }
 
-                     EINTRWRAP(e, ::select(max + 1, &rdfds, nullptr, nullptr, nullptr));
+                     EINTRWRAP(e, ::select(max + 1, &rdfds, &wrfds, nullptr, nullptr));
                      if (e > 0) {
                          if (FD_ISSET(wakeuppipe[0], &rdfds)) {
                              // deal with wakeup data
@@ -270,6 +336,9 @@ void Reader::start(const Napi::Env& env)
                                      doneprocs.push_back(proc);
                                  }
                                  uv_async_send(&async);
+                             }
+                             if (proc->needsWrite && proc->stdin != -1 && FD_ISSET(proc->stdin, &wrfds)) {
+                                 proc->needsWrite = false;
                              }
                          }
                      } else if (e < 0) {
@@ -315,6 +384,41 @@ void Reader::handleSignal(int sig)
     int e;
     unsigned char csig = sig;
     EINTRWRAP(e, ::write(reader.sigpipe[1], &csig, 1));
+}
+
+void Write(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    if (!info[0].IsObject()) {
+        throw Napi::TypeError::New(env, "First argument needs to be a ctx");
+    }
+
+    auto writer = Wrap<std::shared_ptr<Process::Writer> >::unwrap(info[0]);
+    if (!writer) {
+        throw Napi::TypeError::New(env, "First argument is not a ctx");
+    }
+
+    auto proc = writer->process.lock();
+    if (!proc) {
+        throw Napi::TypeError::New(env, "Process is dead");
+    }
+
+    if (info[1].IsBuffer()) {
+        auto buf = info[1].As<Napi::Buffer<const char> >();
+        const std::string str(buf.Data(), buf.Length());
+        std::unique_lock<std::mutex> locker(reader.mutex);
+        proc->newPendingWrite.push_back(std::move(str));
+    } else if (info[1].IsUndefined()) {
+        std::unique_lock<std::mutex> locker(reader.mutex);
+        proc->pendingClose = true;
+    } else {
+        throw Napi::TypeError::New(env, "Data is not a buffer or undefined");
+    }
+
+    int e;
+    char c = 'w';
+    EINTRWRAP(e, ::write(reader.wakeuppipe[1], &c, 1));
 }
 
 void Listen(const Napi::CallbackInfo& info)
@@ -463,6 +567,10 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             proc->stdout = stdoutpipe[0];
             proc->stderr = stderrpipe[0];
 
+            e = fcntl(stdinpipe[1], F_GETFL);
+            if (e != -1) {
+                fcntl(stdinpipe[1], F_SETFL, e | O_NONBLOCK);
+            }
             e = fcntl(stdoutpipe[0], F_GETFL);
             if (e != -1) {
                 fcntl(stdoutpipe[0], F_SETFL, e | O_NONBLOCK);
@@ -478,6 +586,9 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             proc->emitStderr = std::make_shared<BufferEmitter>();
             proc->emitStdout = std::make_shared<BufferEmitter>();
 
+            proc->writer = std::make_shared<Process::Writer>();
+            proc->writer->process = proc;
+
             reader.add(proc);
         }
     } else {
@@ -488,7 +599,9 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
     if (proc) {
         obj.Set("stderrCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStderr));
         obj.Set("stdoutCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStdout));
+        obj.Set("stdinCtx", Wrap<std::shared_ptr<Process::Writer> >::wrap(env, proc->writer));
         obj.Set("listen", Napi::Function::New(env, Listen));
+        obj.Set("write", Napi::Function::New(env, Write));
     }
     obj.Set("promise", promise);
 
