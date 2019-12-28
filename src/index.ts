@@ -32,6 +32,7 @@ function processReadline(data: ReadlineData) {
     switch (data.type) {
     case "lines":
         processLines(data.lines || []);
+        break;
     }
 }
 
