@@ -196,4 +196,50 @@ inline Napi::Value fromVariant(napi_env env, const Variant& variant)
     return Napi::Env(env).Undefined();
 }
 
+template<typename T>
+struct Wrap
+{
+    static Napi::Value wrap(napi_env env, const T& t);
+    static Napi::Value wrap(napi_env env, T&& wrap);
+    static T unwrap(const Napi::Value& value);
+};
+
+template<typename T>
+Napi::Value Wrap<T>::wrap(napi_env env, const T& t)
+{
+    Napi::Object obj = Napi::Object::New(env);
+    if (napi_wrap(env, obj, new T(t),
+                  [](napi_env env, void* data, void* /*hint*/) {
+                      delete reinterpret_cast<T*>(data);
+                  },
+                  nullptr, nullptr) == napi_ok) {
+        return obj;
+    }
+    return Napi::Env(env).Undefined();
+}
+
+template<typename T>
+Napi::Value Wrap<T>::wrap(napi_env env, T&& t)
+{
+    Napi::Object obj = Napi::Object::New(env);
+    if (napi_wrap(env, obj, new T(std::forward<T>(t)),
+                  [](napi_env env, void* data, void* /*hint*/) {
+                      delete reinterpret_cast<T*>(data);
+                  },
+                  nullptr, nullptr) == napi_ok) {
+        return obj;
+    }
+    return Napi::Env(env).Undefined();
+}
+
+template<typename T>
+T Wrap<T>::unwrap(const Napi::Value& value)
+{
+    void* t;
+    if (napi_unwrap(value.Env(), value, &t) == napi_ok) {
+        return *reinterpret_cast<T*>(t);
+    }
+    return T();
+}
+
 #endif
