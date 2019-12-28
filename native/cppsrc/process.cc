@@ -35,7 +35,10 @@ struct BufferEmitter
     };
     std::shared_ptr<Async> async;
 
-    void emit(const std::string& data);
+    void emit(std::string&& data)
+    {
+        queue.push(std::move(data));
+    }
 };
 
 struct Process
@@ -44,7 +47,7 @@ struct Process
     std::vector<std::string> args;
     std::vector<std::pair<std::string, std::string> > env;
 
-    std::shared_ptr<BufferEmitter> emitStdin, emitStdout;
+    std::shared_ptr<BufferEmitter> emitStdout, emitStderr;
 
     int stdin;
     int stdout, stderr;
@@ -91,6 +94,27 @@ void Reader::add(const std::shared_ptr<Process>& proc)
     std::unique_lock<std::mutex> locker(mutex);
     newprocs.push_back(proc);
     EINTRWRAP(e, ::write(wakeuppipe[1], &c, 1));
+}
+
+static void handleRead(int* fd, const std::shared_ptr<BufferEmitter>& emitter)
+{
+    int nfd = *fd;
+    int e;
+    char buf[16384];
+    for (;;) {
+        EINTRWRAP(e, ::read(nfd, buf, sizeof(buf)));
+        if (e > 0) {
+            emitter->emit(std::string(buf, e));
+        } else if (e == 0) {
+            EINTRWRAP(e, ::close(nfd));
+            *fd = -1;
+        } else {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
+            EINTRWRAP(e, ::close(nfd));
+            *fd = -1;
+        }
+    }
 }
 
 void Reader::start(const Napi::Env& env)
@@ -229,9 +253,23 @@ void Reader::start(const Napi::Env& env)
                          for (const auto& proc : procs) {
                              if (proc->stdout != -1 && FD_ISSET(proc->stdout, &rdfds)) {
                                  // deal with proc stdout
+                                 handleRead(&proc->stdout, proc->emitStdout);
+                                 if (!proc->running && proc->stdout == -1 && proc->stderr == -1) {
+                                     // notify js
+                                     std::unique_lock<std::mutex> locker(mutex);
+                                     doneprocs.push_back(proc);
+                                 }
+                                 uv_async_send(&async);
                              }
                              if (proc->stderr != -1 && FD_ISSET(proc->stderr, &rdfds)) {
                                  // deal with proc stderr
+                                 handleRead(&proc->stderr, proc->emitStderr);
+                                 if (!proc->running && proc->stdout == -1 && proc->stderr == -1) {
+                                     // notify js
+                                     std::unique_lock<std::mutex> locker(mutex);
+                                     doneprocs.push_back(proc);
+                                 }
+                                 uv_async_send(&async);
                              }
                          }
                      } else if (e < 0) {
@@ -424,10 +462,20 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             proc->stdin = stdinpipe[1];
             proc->stdout = stdoutpipe[0];
             proc->stderr = stderrpipe[0];
+
+            e = fcntl(stdoutpipe[0], F_GETFL);
+            if (e != -1) {
+                fcntl(stdoutpipe[0], F_SETFL, e | O_NONBLOCK);
+            }
+            e = fcntl(stderrpipe[0], F_GETFL);
+            if (e != -1) {
+                fcntl(stderrpipe[0], F_SETFL, e | O_NONBLOCK);
+            }
+
             proc->pid = pid;
             proc->running = true;
 
-            proc->emitStdin = std::make_shared<BufferEmitter>();
+            proc->emitStderr = std::make_shared<BufferEmitter>();
             proc->emitStdout = std::make_shared<BufferEmitter>();
 
             reader.add(proc);
@@ -438,7 +486,7 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
 
     auto obj = Napi::Object::New(env);
     if (proc) {
-        obj.Set("stdinCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStdin));
+        obj.Set("stderrCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStderr));
         obj.Set("stdoutCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStdout));
         obj.Set("listen", Napi::Function::New(env, Listen));
     }
