@@ -24,7 +24,6 @@ const lexer = moo.states({
         semi: ";",
         pipe: "|",
         star: "*",
-        slash: "/",
         jsstart: { match: "{", push: "js" },
         variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
         keyword: [/if\b/, /for\b/, /repeat\b/, /while\b/, /until\b/, /do\b/, /done\b/, /fi\b/],

@@ -1,6 +1,6 @@
 {
     "targets": [{
-	"target_name": "readline_native",
+	"target_name": "process_native",
 	"cflags!": [ "-fno-exceptions" ],
 	"cflags_cc!": [ "-fno-exceptions" ],
 	"cflags_cc": [ "-std=c++17" ],

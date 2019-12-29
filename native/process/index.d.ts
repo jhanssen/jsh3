@@ -1,6 +1,21 @@
+declare interface InCtx {}
+declare interface OutCtx {}
+
+declare interface Launch
+{
+    promise: Promise<number>;
+    write:(ctx: InCtx, buffer?: Buffer) => void;
+    listen:(ctx: OutCtx, listener: (buffer: Buffer) => void) => void;
+    stdoutCtx?: OutCtx;
+    stderrCtx?: OutCtx;
+    stdinCtx?: InCtx;
+}
+
 declare namespace Native
 {
-    export function launch(): void;
+    export function start(): void;
+    export function stop(): void;
+    export function launch(cmd: string, args?: string[], env?: {[key: string]: string}): Launch;
 }
 
 export default Native;
