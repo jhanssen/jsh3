@@ -18,6 +18,7 @@ public:
     void writeStdout(const char* data, int len = -1);
     void writeStderr(const char* data, int len = -1);
 
+    void quiet();
     void pause();
     void resume();
 
@@ -30,6 +31,7 @@ private:
     };
 
     Dup mStdout, mStderr;
+    int mDevNull;
     bool mPaused;
 };
 

@@ -10,43 +10,51 @@ Redirector::Redirector()
     // should make this a bit more resilient against errors
 
     // first dup our real stdout and stderr
-    mStdout.real = dup(STDOUT_FILENO);
-    mStderr.real = dup(STDERR_FILENO);
+    EINTRWRAP(mStdout.real, dup(STDOUT_FILENO));
+    EINTRWRAP(mStderr.real, dup(STDERR_FILENO));
 
     // make two pipes
     ::pipe(mStdout.pipe);
     ::pipe(mStderr.pipe);
 
+    int e;
     // make the read end non-blocking
-    int r = fcntl(mStdout.pipe[0], F_GETFL);
-    fcntl(mStdout.pipe[0], F_SETFL, r | O_NONBLOCK);
-    r = fcntl(mStderr.pipe[0], F_GETFL);
-    fcntl(mStderr.pipe[0], F_SETFL, r | O_NONBLOCK);
+    e = fcntl(mStdout.pipe[0], F_GETFL);
+    fcntl(mStdout.pipe[0], F_SETFL, e | O_NONBLOCK);
+    e = fcntl(mStderr.pipe[0], F_GETFL);
+    fcntl(mStderr.pipe[0], F_SETFL, e | O_NONBLOCK);
 
     // dup our stdout and stderr fds
-    dup2(mStdout.pipe[1], STDOUT_FILENO);
-    dup2(mStderr.pipe[1], STDERR_FILENO);
+    EINTRWRAP(e, dup2(mStdout.pipe[1], STDOUT_FILENO));
+    EINTRWRAP(e, dup2(mStderr.pipe[1], STDERR_FILENO));
 
     // make our file ptrs
     mStdout.file = fdopen(mStdout.real, "w");
     mStderr.file = fdopen(mStderr.real, "w");
+
+    // open /dev/null
+    EINTRWRAP(mDevNull, open("/dev/null", O_WRONLY));
 }
 
 Redirector::~Redirector()
 {
     // close the pipes
-    ::close(mStdout.pipe[0]);
-    ::close(mStdout.pipe[1]);
-    ::close(mStderr.pipe[0]);
-    ::close(mStderr.pipe[1]);
+    int e;
+    EINTRWRAP(e, ::close(mStdout.pipe[0]));
+    EINTRWRAP(e, ::close(mStdout.pipe[1]));
+    EINTRWRAP(e, ::close(mStderr.pipe[0]));
+    EINTRWRAP(e, ::close(mStderr.pipe[1]));
+
+    // close /dev/null
+    EINTRWRAP(e, ::close(mDevNull));
 
     // restore our file descriptors
-    dup2(mStdout.real, STDOUT_FILENO);
-    dup2(mStderr.real, STDERR_FILENO);
+    EINTRWRAP(e, dup2(mStdout.real, STDOUT_FILENO));
+    EINTRWRAP(e, dup2(mStderr.real, STDERR_FILENO));
 
     // and close our file ptrs, not sure if this is needed
-    fclose(mStdout.file);
-    fclose(mStderr.file);
+    EINTRWRAP(e, fclose(mStdout.file));
+    EINTRWRAP(e, fclose(mStderr.file));
 }
 
 void Redirector::writeStdout(const char* data, int len)
@@ -71,8 +79,20 @@ void Redirector::pause()
         return;
     mPaused = true;
     // restore fds
-    dup2(mStdout.real, STDOUT_FILENO);
-    dup2(mStderr.real, STDERR_FILENO);
+    int e;
+    EINTRWRAP(e, dup2(mStdout.real, STDOUT_FILENO));
+    EINTRWRAP(e, dup2(mStderr.real, STDERR_FILENO));
+}
+
+void Redirector::quiet()
+{
+    if (mPaused)
+        return;
+    mPaused = true;
+    // quiet fds
+    int e;
+    EINTRWRAP(e, dup2(mDevNull, STDOUT_FILENO));
+    EINTRWRAP(e, dup2(mDevNull, STDERR_FILENO));
 }
 
 void Redirector::resume()
@@ -81,6 +101,7 @@ void Redirector::resume()
         return;
     mPaused = false;
     // restore fds
-    dup2(mStdout.pipe[1], STDOUT_FILENO);
-    dup2(mStderr.pipe[1], STDERR_FILENO);
+    int e;
+    EINTRWRAP(e, dup2(mStdout.pipe[1], STDOUT_FILENO));
+    EINTRWRAP(e, dup2(mStderr.pipe[1], STDERR_FILENO));
 }

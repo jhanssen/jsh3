@@ -17,6 +17,7 @@ struct State
     int wakeupPipe[2];
     bool running { false };
     bool stopped { false };
+    bool paused { false };
     Napi::FunctionReference callback;
     std::unique_ptr<Napi::AsyncContext> ctx;
     std::string historyFile;
@@ -30,6 +31,10 @@ struct State
     } readline;
 
     static void run(void* arg);
+    static void lineHandler(char* line);
+
+    void readlineInit();
+    void readlineDeinit();
 
     // pause state
     char* savedLine { nullptr };
@@ -219,6 +224,34 @@ void State::wakeup(WakeupReason reason)
     EINTRWRAP(e, ::write(state.wakeupPipe[1], &r, 1));
 }
 
+void State::lineHandler(char* line)
+{
+    if (!line) {
+        // we're done
+        state.stopped = true;
+        return;
+    }
+    state.readline.lines.push(line);
+    uv_async_send(&state.readline.async);
+
+    free(line);
+}
+
+void State::readlineInit()
+{
+    rl_initialize();
+    rl_resize_terminal();
+
+    rl_callback_handler_install("pr> ", lineHandler);
+
+    using_history();
+}
+
+void State::readlineDeinit()
+{
+    rl_callback_handler_remove();
+}
+
 void State::run(void*)
 {
     auto processTasks = []() {
@@ -233,15 +266,6 @@ void State::run(void*)
                         };
 
     state.stopped = false;
-    auto handler = [](char* line) {
-                       if (!line) {
-                           // we're done
-                           state.stopped = true;
-                           return;
-                       }
-                       state.readline.lines.push(line);
-                       uv_async_send(&state.readline.async);
-                   };
 
     rl_persistent_signal_handlers = 0;
     rl_catch_signals = 0;
@@ -252,12 +276,7 @@ void State::run(void*)
     rl_char_is_quoted_p = char_is_quoted;
     rl_completer_quote_characters = "'\"";
 
-    rl_initialize();
-    rl_resize_terminal();
-
-    rl_callback_handler_install("pr> ", handler);
-
-    using_history();
+    state.readlineInit();
 
     fd_set rdset;
 
@@ -277,9 +296,11 @@ void State::run(void*)
 
     for (;;) {
         FD_ZERO(&rdset);
-        FD_SET(STDIN_FILENO, &rdset);
-        FD_SET(stdoutfd, &rdset);
-        FD_SET(stderrfd, &rdset);
+        if (!state.paused) {
+            FD_SET(STDIN_FILENO, &rdset);
+            FD_SET(stdoutfd, &rdset);
+            FD_SET(stderrfd, &rdset);
+        }
         FD_SET(state.wakeupPipe[0], &rdset);
 
         int r = select(max + 1, &rdset, 0, 0, 0);
@@ -306,33 +327,35 @@ void State::run(void*)
                 }
             }
         }
-        if (FD_ISSET(stdoutfd, &rdset)) {
-            handleOut(stdoutfd, stdoutfunc);
-        }
-        if (FD_ISSET(stderrfd, &rdset)) {
-            handleOut(stderrfd, stderrfunc);
-        }
-        if (FD_ISSET(STDIN_FILENO, &rdset)) {
-            // read until we have nothing more to read
-            if (r == -1) {
-                // ugh
-                break;
+        if (!state.paused) {
+            if (FD_ISSET(stdoutfd, &rdset)) {
+                handleOut(stdoutfd, stdoutfunc);
             }
-            bool error = false;
-            int rem;
-            for (;;) {
-                rl_callback_read_char();
-                // loop while we have more characters
-                if (ioctl(STDIN_FILENO, FIONREAD, &rem) == -1) {
+            if (FD_ISSET(stderrfd, &rdset)) {
+                handleOut(stderrfd, stderrfunc);
+            }
+            if (FD_ISSET(STDIN_FILENO, &rdset)) {
+                // read until we have nothing more to read
+                if (r == -1) {
                     // ugh
-                    error = true;
                     break;
                 }
-                if (!rem)
+                bool error = false;
+                int rem;
+                for (;;) {
+                    rl_callback_read_char();
+                    // loop while we have more characters
+                    if (ioctl(STDIN_FILENO, FIONREAD, &rem) == -1) {
+                        // ugh
+                        error = true;
+                        break;
+                    }
+                    if (!rem)
+                        break;
+                }
+                if (error)
                     break;
             }
-            if (error)
-                break;
         }
     }
 }
@@ -448,6 +471,39 @@ void Stop(const Napi::CallbackInfo& info)
     auto env = info.Env();
 }
 
+Napi::Value Pause(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    return state.runTask(env, env.Undefined(),
+                         [](const Variant& arg) -> Variant {
+                             if (state.paused)
+                                 return Undefined;
+                             state.paused = true;
+                             rl_set_prompt("");
+                             rl_replace_line("", 0);
+                             rl_redisplay();
+                             state.redirector.quiet();
+                             state.readlineDeinit();
+                             return Undefined;
+                         });
+}
+
+Napi::Value Resume(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    return state.runTask(env, env.Undefined(),
+                         [](const Variant& arg) -> Variant {
+                             if (!state.paused)
+                                 return Undefined;
+                             state.paused = false;
+                             state.redirector.resume();
+                             state.readlineInit();
+                             return Undefined;
+                         });
+}
+
 Napi::Value AddHistory(const Napi::CallbackInfo& info)
 {
     auto env = info.Env();
@@ -521,6 +577,8 @@ Napi::Object Setup(Napi::Env env, Napi::Object exports)
 {
     exports.Set("start", Napi::Function::New(env, Start));
     exports.Set("stop", Napi::Function::New(env, Stop));
+    exports.Set("pause", Napi::Function::New(env, Pause));
+    exports.Set("resume", Napi::Function::New(env, Resume));
     exports.Set("addHistory", Napi::Function::New(env, AddHistory));
     exports.Set("readHistory", Napi::Function::New(env, ReadHistory));
     exports.Set("writeHistory", Napi::Function::New(env, WriteHistory));
