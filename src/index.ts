@@ -30,6 +30,9 @@ function handlePauseRl(cmd: string, args: string[]) {
                     resolve();
                 });
             }, timeout);
+            setTimeout(() => {
+                Readline.setPrompt("hello> ");
+            }, timeout * 2);
         }).catch(e => {
             reject(e);
         });

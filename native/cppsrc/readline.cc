@@ -21,6 +21,7 @@ struct State
     Napi::FunctionReference callback;
     std::unique_ptr<Napi::AsyncContext> ctx;
     std::string historyFile;
+    std::string prompt { "jsh3> " };
 
     enum class WakeupReason { Stop, Task };
     void wakeup(WakeupReason reason);
@@ -242,7 +243,7 @@ void State::readlineInit()
     rl_initialize();
     rl_resize_terminal();
 
-    rl_callback_handler_install("pr> ", lineHandler);
+    rl_callback_handler_install(state.prompt.c_str(), lineHandler);
 
     using_history();
 }
@@ -504,6 +505,25 @@ Napi::Value Resume(const Napi::CallbackInfo& info)
                          });
 }
 
+Napi::Value SetPrompt(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    if (!info[0].IsString()) {
+        throw Napi::TypeError::New(env, "First argument needs to be a string");
+    }
+
+    return state.runTask(env, info[0],
+                         [](const Variant& arg) -> Variant {
+                             if (auto nstr = std::get_if<std::string>(&arg)) {
+                                 state.prompt = *nstr;
+                                 rl_set_prompt(nstr->c_str());
+                                 rl_redisplay();
+                             }
+                             return Undefined;
+                         });
+}
+
 Napi::Value AddHistory(const Napi::CallbackInfo& info)
 {
     auto env = info.Env();
@@ -579,6 +599,7 @@ Napi::Object Setup(Napi::Env env, Napi::Object exports)
     exports.Set("stop", Napi::Function::New(env, Stop));
     exports.Set("pause", Napi::Function::New(env, Pause));
     exports.Set("resume", Napi::Function::New(env, Resume));
+    exports.Set("setPrompt", Napi::Function::New(env, SetPrompt));
     exports.Set("addHistory", Napi::Function::New(env, AddHistory));
     exports.Set("readHistory", Napi::Function::New(env, ReadHistory));
     exports.Set("writeHistory", Napi::Function::New(env, WriteHistory));
