@@ -5,6 +5,7 @@ declare interface Launch
 {
     promise: Promise<number>;
     write:(ctx: InCtx, buffer?: Buffer) => void;
+    close:(ctx: InCtx) => void;
     listen:(ctx: OutCtx, listener: (buffer: Buffer) => void) => void;
     stdoutCtx?: OutCtx;
     stderrCtx?: OutCtx;

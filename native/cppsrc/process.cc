@@ -462,6 +462,32 @@ void Write(const Napi::CallbackInfo& info)
     EINTRWRAP(e, ::write(reader.wakeuppipe[1], &c, 1));
 }
 
+void Close(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    if (!info[0].IsObject()) {
+        throw Napi::TypeError::New(env, "First argument needs to be a ctx");
+    }
+
+    auto writer = Wrap<std::shared_ptr<Process::Writer> >::unwrap(info[0]);
+    if (!writer) {
+        throw Napi::TypeError::New(env, "First argument is not a ctx");
+    }
+
+    auto proc = writer->process.lock();
+    if (!proc) {
+        throw Napi::TypeError::New(env, "Process is dead");
+    }
+
+    std::unique_lock<std::mutex> locker(reader.mutex);
+    proc->pendingClose = true;
+
+    int e;
+    char c = 'w';
+    EINTRWRAP(e, ::write(reader.wakeuppipe[1], &c, 1));
+}
+
 void Listen(const Napi::CallbackInfo& info)
 {
     auto env = info.Env();
@@ -644,6 +670,7 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
     }
     obj.Set("listen", Napi::Function::New(env, Listen));
     obj.Set("write", Napi::Function::New(env, Write));
+    obj.Set("close", Napi::Function::New(env, Close));
     obj.Set("promise", promise);
 
     return obj;

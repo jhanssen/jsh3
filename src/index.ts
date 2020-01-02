@@ -61,7 +61,7 @@ function visitCmd(node: any) {
         console.error("failed to launch", e);
     });
     if (p.stdinCtx) {
-        p.write(p.stdinCtx);
+        p.close(p.stdinCtx);
     }
     if (p.stdoutCtx) {
         p.listen(p.stdoutCtx, (buf: Buffer) => {
