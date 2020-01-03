@@ -73,8 +73,8 @@ struct Reader
     Reader();
 
     uv_async_t async;
-    std::mutex mutex;
-    std::thread thread;
+    Mutex mutex;
+    uv_thread_t thread;
     std::vector<std::shared_ptr<BufferEmitter> > pendingemitters;
     std::vector<std::shared_ptr<Process> > newprocs, procs, doneprocs;
     int sigpipe[2];
@@ -102,7 +102,7 @@ void Reader::add(const std::shared_ptr<Process>& proc)
 {
     int e;
     char c = 'a';
-    std::unique_lock<std::mutex> locker(mutex);
+    MutexLocker locker(&mutex);
     newprocs.push_back(proc);
     EINTRWRAP(e, ::write(wakeuppipe[1], &c, 1));
 }
@@ -112,7 +112,7 @@ void BufferEmitter::emit(std::string&& data)
     //printf("emitting %zu\n", data.size());
     queue.push(std::move(data));
 
-    std::unique_lock<std::mutex> locker(reader.mutex);
+    MutexLocker locker(&reader.mutex);
     reader.pendingemitters.push_back(shared_from_this());
 }
 
@@ -213,7 +213,7 @@ void Reader::start(const Napi::Env& env)
                       std::vector<std::shared_ptr<Process> > dp;
                       std::vector<std::shared_ptr<BufferEmitter> > pe;
                       {
-                          std::unique_lock<std::mutex> locker(reader.mutex);
+                          MutexLocker locker(&reader.mutex);
                           std::swap(dp, reader.doneprocs);
                           std::swap(pe, reader.pendingemitters);
                       }
@@ -248,135 +248,137 @@ void Reader::start(const Napi::Env& env)
                   });
 
     stopped = false;
-    thread = std::thread([this]() {
-                 fd_set rdfds;
-                 fd_set wrfds;
-                 const int pmax = std::max(wakeuppipe[0], sigpipe[0]);
-                 int e;
-                 for (;;) {
-                     //printf("top of thread\n");
-                     FD_ZERO(&rdfds);
-                     FD_ZERO(&wrfds);
-                     FD_SET(wakeuppipe[0], &rdfds);
-                     FD_SET(sigpipe[0], &rdfds);
+    uv_thread_create(&thread,
+                     [](void* arg) {
+                         Reader* reader = static_cast<Reader*>(arg);
+                         fd_set rdfds;
+                         fd_set wrfds;
+                         const int pmax = std::max(reader->wakeuppipe[0], reader->sigpipe[0]);
+                         int e;
+                         for (;;) {
+                             //printf("top of thread\n");
+                             FD_ZERO(&rdfds);
+                             FD_ZERO(&wrfds);
+                             FD_SET(reader->wakeuppipe[0], &rdfds);
+                             FD_SET(reader->sigpipe[0], &rdfds);
 
-                     bool newproc = false;
+                             bool newproc = false;
 
-                     {
-                         std::unique_lock<std::mutex> locker(mutex);
-                         if (!newprocs.empty()) {
-                             //printf("got new procs\n");
-                             procs.reserve(newprocs.size() + procs.size());
-                             std::move(std::begin(newprocs), std::end(newprocs), std::back_inserter(procs));
-                             newprocs.clear();
-                             newproc = true;
-                         }
-                     }
-
-                     if (newproc) {
-                         // make sure that our new processes are still alive
-                         handleSigChld();
-                     }
-
-                     int max = pmax;
-                     for (const auto& proc : procs) {
-                         if (proc->stdout != -1) {
-                             FD_SET(proc->stdout, &rdfds);
-                             if (proc->stdout > max)
-                                 max = proc->stdout;
-                         }
-                         if (proc->stderr != -1) {
-                             FD_SET(proc->stderr, &rdfds);
-                             if (proc->stderr > max)
-                                 max = proc->stderr;
-                         }
-                         {
-                             std::unique_lock<std::mutex> locker(mutex);
-                             if (!proc->newPendingWrite.empty()) {
-                                 std::move(std::begin(proc->newPendingWrite), std::end(proc->newPendingWrite), std::back_inserter(proc->pendingWrite));
-                             }
-                         }
-                         if (!proc->pendingWrite.empty() && !proc->needsWrite) {
-                             handleWrite(proc.get());
-                         }
-                         if (proc->pendingWrite.empty() && proc->stdin != -1) {
-                             std::unique_lock<std::mutex> locker(reader.mutex);
-                             if (proc->pendingClose) {
-                                 //printf("closing stdin\n");
-                                 proc->pendingClose = false;
-                                 EINTRWRAP(e, ::close(proc->stdin));
-                                 proc->stdin = -1;
-                             }
-                         }
-                         if (proc->stdin != -1 && proc->needsWrite) {
-                             FD_SET(proc->stdin, &wrfds);
-                         }
-                     }
-
-                     EINTRWRAP(e, ::select(max + 1, &rdfds, &wrfds, nullptr, nullptr));
-                     if (e > 0) {
-                         if (FD_ISSET(wakeuppipe[0], &rdfds)) {
-                             //printf("wakeup due to pipe\n");
-                             // deal with wakeup data
-                             unsigned char w;
-                             for (;;) {
-                                 EINTRWRAP(e, ::read(wakeuppipe[0], &w, 1));
-                                 if (e == 1) {
+                             {
+                                 MutexLocker locker(&reader->mutex);
+                                 if (!reader->newprocs.empty()) {
+                                     //printf("got new procs\n");
+                                     reader->procs.reserve(reader->newprocs.size() + reader->procs.size());
+                                     std::move(std::begin(reader->newprocs), std::end(reader->newprocs), std::back_inserter(reader->procs));
+                                     reader->newprocs.clear();
+                                     newproc = true;
                                  }
-                                 // should handle error other than EAGAIN/EWOULDBLOCK
-                                 if (e == -1)
-                                     break;
                              }
-                             std::unique_lock<std::mutex> locker(mutex);
-                             if (stopped)
-                                 return;
-                         }
-                         if (FD_ISSET(sigpipe[0], &rdfds)) {
-                             //printf("wakeup due to signal\n");
-                             // deal with signal data
-                             unsigned char s;
-                             for (;;) {
-                                 EINTRWRAP(e, ::read(sigpipe[0], &s, 1));
-                                 if (e == 1 && s == SIGCHLD) {
-                                     handleSigChld();
+
+                             if (newproc) {
+                                 // make sure that our new processes are still alive
+                                 reader->handleSigChld();
+                             }
+
+                             int max = pmax;
+                             for (const auto& proc : reader->procs) {
+                                 if (proc->stdout != -1) {
+                                     FD_SET(proc->stdout, &rdfds);
+                                     if (proc->stdout > max)
+                                         max = proc->stdout;
                                  }
-                                 // should handle error other than EAGAIN/EWOULDBLOCK
-                                 if (e == -1)
-                                     break;
+                                 if (proc->stderr != -1) {
+                                     FD_SET(proc->stderr, &rdfds);
+                                     if (proc->stderr > max)
+                                         max = proc->stderr;
+                                 }
+                                 {
+                                     MutexLocker locker(&reader->mutex);
+                                     if (!proc->newPendingWrite.empty()) {
+                                         std::move(std::begin(proc->newPendingWrite), std::end(proc->newPendingWrite), std::back_inserter(proc->pendingWrite));
+                                     }
+                                 }
+                                 if (!proc->pendingWrite.empty() && !proc->needsWrite) {
+                                     handleWrite(proc.get());
+                                 }
+                                 if (proc->pendingWrite.empty() && proc->stdin != -1) {
+                                     MutexLocker locker(&reader->mutex);
+                                     if (proc->pendingClose) {
+                                         //printf("closing stdin\n");
+                                         proc->pendingClose = false;
+                                         EINTRWRAP(e, ::close(proc->stdin));
+                                         proc->stdin = -1;
+                                     }
+                                 }
+                                 if (proc->stdin != -1 && proc->needsWrite) {
+                                     FD_SET(proc->stdin, &wrfds);
+                                 }
+                             }
+
+                             EINTRWRAP(e, ::select(max + 1, &rdfds, &wrfds, nullptr, nullptr));
+                             if (e > 0) {
+                                 if (FD_ISSET(reader->wakeuppipe[0], &rdfds)) {
+                                     //printf("wakeup due to pipe\n");
+                                     // deal with wakeup data
+                                     unsigned char w;
+                                     for (;;) {
+                                         EINTRWRAP(e, ::read(reader->wakeuppipe[0], &w, 1));
+                                         if (e == 1) {
+                                         }
+                                         // should handle error other than EAGAIN/EWOULDBLOCK
+                                         if (e == -1)
+                                             break;
+                                     }
+                                     MutexLocker locker(&reader->mutex);
+                                     if (reader->stopped)
+                                         return;
+                                 }
+                                 if (FD_ISSET(reader->sigpipe[0], &rdfds)) {
+                                     //printf("wakeup due to signal\n");
+                                     // deal with signal data
+                                     unsigned char s;
+                                     for (;;) {
+                                         EINTRWRAP(e, ::read(reader->sigpipe[0], &s, 1));
+                                         if (e == 1 && s == SIGCHLD) {
+                                             reader->handleSigChld();
+                                         }
+                                         // should handle error other than EAGAIN/EWOULDBLOCK
+                                         if (e == -1)
+                                             break;
+                                     }
+                                 }
+                                 for (const auto& proc : reader->procs) {
+                                     if (proc->stdout != -1 && FD_ISSET(proc->stdout, &rdfds)) {
+                                         //printf("wakeup due to stdout\n");
+                                         // deal with proc stdout
+                                         handleRead(&proc->stdout, proc->emitStdout);
+                                         if (!proc->running && proc->stdout == -1 && proc->stderr == -1) {
+                                             // notify js
+                                             MutexLocker locker(&reader->mutex);
+                                             reader->doneprocs.push_back(proc);
+                                         }
+                                         uv_async_send(&reader->async);
+                                     }
+                                     if (proc->stderr != -1 && FD_ISSET(proc->stderr, &rdfds)) {
+                                         //printf("wakeup due to stderr\n");
+                                         // deal with proc stderr
+                                         handleRead(&proc->stderr, proc->emitStderr);
+                                         if (!proc->running && proc->stdout == -1 && proc->stderr == -1) {
+                                             // notify js
+                                             MutexLocker locker(&reader->mutex);
+                                             reader->doneprocs.push_back(proc);
+                                         }
+                                         uv_async_send(&reader->async);
+                                     }
+                                     if (proc->needsWrite && proc->stdin != -1 && FD_ISSET(proc->stdin, &wrfds)) {
+                                         proc->needsWrite = false;
+                                     }
+                                 }
+                             } else if (e < 0) {
+                                 // bad
                              }
                          }
-                         for (const auto& proc : procs) {
-                             if (proc->stdout != -1 && FD_ISSET(proc->stdout, &rdfds)) {
-                                 //printf("wakeup due to stdout\n");
-                                 // deal with proc stdout
-                                 handleRead(&proc->stdout, proc->emitStdout);
-                                 if (!proc->running && proc->stdout == -1 && proc->stderr == -1) {
-                                     // notify js
-                                     std::unique_lock<std::mutex> locker(mutex);
-                                     doneprocs.push_back(proc);
-                                 }
-                                 uv_async_send(&async);
-                             }
-                             if (proc->stderr != -1 && FD_ISSET(proc->stderr, &rdfds)) {
-                                 //printf("wakeup due to stderr\n");
-                                 // deal with proc stderr
-                                 handleRead(&proc->stderr, proc->emitStderr);
-                                 if (!proc->running && proc->stdout == -1 && proc->stderr == -1) {
-                                     // notify js
-                                     std::unique_lock<std::mutex> locker(mutex);
-                                     doneprocs.push_back(proc);
-                                 }
-                                 uv_async_send(&async);
-                             }
-                             if (proc->needsWrite && proc->stdin != -1 && FD_ISSET(proc->stdin, &wrfds)) {
-                                 proc->needsWrite = false;
-                             }
-                         }
-                     } else if (e < 0) {
-                         // bad
-                     }
-                 }
-             });
+                     }, this);
 }
 
 void Reader::stop(const Napi::Env& env)
@@ -386,7 +388,7 @@ void Reader::stop(const Napi::Env& env)
     }
 
     {
-        std::unique_lock<std::mutex> locker(mutex);
+        MutexLocker locker(&mutex);
         stopped = true;
     }
 
@@ -394,7 +396,7 @@ void Reader::stop(const Napi::Env& env)
     char c = 'q';
     EINTRWRAP(e, ::write(reader.wakeuppipe[1], &c, 1));
 
-    thread.join();
+    uv_thread_join(&thread);
 
     EINTRWRAP(e, ::close(sigpipe[0]));
     EINTRWRAP(e, ::close(sigpipe[1]));
@@ -416,7 +418,7 @@ void Reader::handleSigChld()
             proc->status = status;
             if (proc->stdout == -1 && proc->stderr == -1) {
                 // all done, notify js
-                std::unique_lock<std::mutex> locker(mutex);
+                MutexLocker locker(&mutex);
                 doneprocs.push_back(proc);
                 uv_async_send(&async);
             }
@@ -452,10 +454,10 @@ void Write(const Napi::CallbackInfo& info)
     if (info[1].IsBuffer()) {
         auto buf = info[1].As<Napi::Buffer<const char> >();
         const std::string str(buf.Data(), buf.Length());
-        std::unique_lock<std::mutex> locker(reader.mutex);
+        MutexLocker locker(&reader.mutex);
         proc->newPendingWrite.push_back(std::move(str));
     } else if (info[1].IsUndefined()) {
-        std::unique_lock<std::mutex> locker(reader.mutex);
+        MutexLocker locker(&reader.mutex);
         proc->pendingClose = true;
     } else {
         throw Napi::TypeError::New(env, "Data is not a buffer or undefined");
@@ -484,7 +486,7 @@ void Close(const Napi::CallbackInfo& info)
         throw Napi::TypeError::New(env, "Process is dead");
     }
 
-    std::unique_lock<std::mutex> locker(reader.mutex);
+    MutexLocker locker(&reader.mutex);
     proc->pendingClose = true;
 
     int e;
