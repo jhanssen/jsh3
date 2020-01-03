@@ -596,7 +596,7 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
         EINTRWRAP(e, ::write(runpipe[1], &c, 1));
         EINTRWRAP(e, ::close(runpipe[1]));
 
-        exit(-1);
+        _exit(-1);
     } else if (pid > 0) {
         // parent
 
