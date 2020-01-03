@@ -103,7 +103,10 @@ function visit(node: any) {
     }
 }
 
-function processLines(lines: string[]) {
+function processLines(lines: string[] | undefined) {
+    if (!lines)
+        return;
+
     const promises: Promise<void>[] = [];
     for (const line of lines) {
         promises.push(Readline.addHistory(line, true));
@@ -122,6 +125,7 @@ function processLines(lines: string[]) {
 function processCompletion(data: ReadlineCompletion | undefined) {
     if (!data)
         return;
+
     //console.log("want to complete", data);
     data.complete(["faff"]);
 }
@@ -129,7 +133,7 @@ function processCompletion(data: ReadlineCompletion | undefined) {
 function processReadline(data: ReadlineData) {
     switch (data.type) {
     case "lines":
-        processLines(data.lines || []);
+        processLines(data.lines);
         break;
     case "completion":
         processCompletion(data.completion);
