@@ -15,6 +15,7 @@ struct State
 {
     Redirector redirector;
     uv_thread_t thread;
+    uv_signal_t winch;
     int wakeupPipe[2];
     bool running { false };
     bool stopped { false };
@@ -25,7 +26,7 @@ struct State
     std::string historyFile;
     std::string prompt { "jsh3> " };
 
-    enum class WakeupReason { Stop, Task, Complete };
+    enum class WakeupReason { Stop, Task, Complete, Winch };
     void wakeup(WakeupReason reason);
 
     struct {
@@ -310,6 +311,9 @@ char** State::completer(const char* text, int start, int end)
                             return array;
                         }
                         return nullptr; }
+                    case WakeupReason::Winch:
+                        rl_resize_terminal();
+                        break;
                     }
                 }
             }
@@ -409,6 +413,9 @@ void State::run(void*)
                         processTasks();
                         break;
                     case WakeupReason::Complete:
+                        break;
+                    case WakeupReason::Winch:
+                        rl_resize_terminal();
                         break;
                     }
                 }
@@ -606,6 +613,11 @@ Napi::Value Start(const Napi::CallbackInfo& info)
     uv_async_init(uv_default_loop(), &state.tasks.async, handleAsync);
     uv_async_init(uv_default_loop(), &state.completion.async, handleAsync);
 
+    uv_signal_init(uv_default_loop(), &state.winch);
+    uv_signal_start(&state.winch, [](uv_signal_t*, int) {
+                                      state.wakeup(State::WakeupReason::Winch);
+                                  }, SIGWINCH);
+
     uv_thread_create(&state.thread, State::run, 0);
     state.running = true;
 
@@ -647,6 +659,26 @@ Napi::Value Resume(const Napi::CallbackInfo& info)
                              state.paused = false;
                              state.redirector.resume();
                              state.readlineInit();
+                             return Undefined;
+                         });
+}
+
+Napi::Value Clear(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    return state.runTask(env, env.Undefined(),
+                         [](const Variant& arg) -> Variant {
+                             rl_callback_sigcleanup();
+
+                             if (rl_undo_list)
+                                 rl_free_undo_list ();
+                             rl_clear_message();
+                             rl_crlf();
+                             rl_point = rl_mark = 0;
+                             rl_kill_text (rl_point, rl_end);
+                             rl_mark = 0;
+                             rl_reset_line_state();
                              return Undefined;
                          });
 }
@@ -745,6 +777,7 @@ Napi::Object Setup(Napi::Env env, Napi::Object exports)
     exports.Set("stop", Napi::Function::New(env, Stop));
     exports.Set("pause", Napi::Function::New(env, Pause));
     exports.Set("resume", Napi::Function::New(env, Resume));
+    exports.Set("clear", Napi::Function::New(env, Clear));
     exports.Set("setPrompt", Napi::Function::New(env, SetPrompt));
     exports.Set("addHistory", Napi::Function::New(env, AddHistory));
     exports.Set("readHistory", Napi::Function::New(env, ReadHistory));
