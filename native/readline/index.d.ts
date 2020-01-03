@@ -1,7 +1,17 @@
+export interface Completion
+{
+    buffer: string;
+    text: string;
+    start: number;
+    end: number;
+    complete(data?: string[]): void;
+}
+
 export interface Data
 {
     type: string
     lines?: string[];
+    completion?: Completion;
 }
 
 declare function nativeCallback(data: Data): void;

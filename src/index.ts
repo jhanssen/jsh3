@@ -1,6 +1,6 @@
 import * as nearley from "nearley"
 import { jsh3_grammar } from "./parser"
-import { default as Readline, Data as ReadlineData } from "../native/readline";
+import { default as Readline, Data as ReadlineData, Completion as ReadlineCompletion } from "../native/readline";
 import { default as Process } from "../native/process";
 import { join as pathJoin } from "path";
 import { homedir } from "os";
@@ -119,10 +119,20 @@ function processLines(lines: string[]) {
     });
 }
 
+function processCompletion(data: ReadlineCompletion | undefined) {
+    if (!data)
+        return;
+    //console.log("want to complete", data);
+    data.complete(["faff"]);
+}
+
 function processReadline(data: ReadlineData) {
     switch (data.type) {
     case "lines":
         processLines(data.lines || []);
+        break;
+    case "completion":
+        processCompletion(data.completion);
         break;
     }
 }

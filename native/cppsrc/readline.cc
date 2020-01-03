@@ -1,5 +1,6 @@
 #include "Redirector.h"
 #include "utils.h"
+#include <assert.h>
 #include <memory>
 #include <string>
 #include <napi.h>
@@ -18,12 +19,13 @@ struct State
     bool running { false };
     bool stopped { false };
     bool paused { false };
+    bool pendingProcessTasks { false };
     Napi::FunctionReference callback;
     std::unique_ptr<Napi::AsyncContext> ctx;
     std::string historyFile;
     std::string prompt { "jsh3> " };
 
-    enum class WakeupReason { Stop, Task };
+    enum class WakeupReason { Stop, Task, Complete };
     void wakeup(WakeupReason reason);
 
     struct {
@@ -31,8 +33,21 @@ struct State
         Queue<std::string> lines;
     } readline;
 
+    struct {
+        uv_async_t async;
+        struct {
+            std::string buffer;
+            std::string text;
+            int start, end;
+        } pending;
+        std::vector<std::string> results;
+        bool inComplete { false };
+        Mutex mutex;
+    } completion;
+
     static void run(void* arg);
     static void lineHandler(char* line);
+    static char** completer(const char* text, int start, int end);
 
     void readlineInit();
     void readlineDeinit();
@@ -238,6 +253,72 @@ void State::lineHandler(char* line)
     free(line);
 }
 
+char** State::completer(const char* text, int start, int end)
+{
+    {
+        MutexLocker locker(&state.completion.mutex);
+        state.completion.inComplete = true;
+        state.completion.pending = { std::string(rl_line_buffer), std::string(text), start, end };
+        uv_async_send(&state.completion.async);
+    }
+
+    // ### if we want file completion, just return nullptr before setting this variable
+    rl_attempted_completion_over = 1;
+
+    // we want full control over the output
+    rl_completion_suppress_append = 1;
+    rl_completion_suppress_quote = 1;
+
+    const int max = state.wakeupPipe[0];
+    fd_set rdset;
+    for (;;) {
+        FD_ZERO(&rdset);
+        FD_SET(state.wakeupPipe[0], &rdset);
+
+        int r = select(max + 1, &rdset, 0, 0, 0);
+        if (r <= 0) {
+            // boo
+            return nullptr;
+        }
+
+        if (FD_ISSET(state.wakeupPipe[0], &rdset)) {
+            char c;
+            for (;;) {
+                EINTRWRAP(r, read(state.wakeupPipe[0], &c, 1));
+                if (r == -1)
+                    break;
+                if (r == 1) {
+                    const WakeupReason reason = static_cast<WakeupReason>(c);
+                    switch (reason) {
+                    case WakeupReason::Stop:
+                        state.stopped = true;
+                        break;
+                    case WakeupReason::Task:
+                        state.pendingProcessTasks = true;
+                        break;
+                    case WakeupReason::Complete: {
+                        MutexLocker locker(&state.completion.mutex);
+                        assert(!state.completion.inComplete);
+                        if (!state.completion.results.empty()) {
+                            char** array = static_cast<char**>(malloc((2 + state.completion.results.size()) * sizeof(*array)));
+                            array[0] = strdup(longest_common_prefix(text, state.completion.results).c_str());
+                            size_t ptr = 1;
+                            for (const auto& m : state.completion.results) {
+                                array[ptr++] = strdup(m.c_str());
+                            }
+                            array[ptr] = nullptr;
+                            return array;
+                        }
+                        return nullptr; }
+                    }
+                }
+            }
+        }
+    }
+
+    return nullptr;
+}
+
 void State::readlineInit()
 {
     rl_initialize();
@@ -276,6 +357,8 @@ void State::run(void*)
 
     rl_char_is_quoted_p = char_is_quoted;
     rl_completer_quote_characters = "'\"";
+
+    rl_attempted_completion_function = completer;
 
     state.readlineInit();
 
@@ -320,9 +403,12 @@ void State::run(void*)
                     const WakeupReason reason = static_cast<WakeupReason>(c);
                     switch (reason) {
                     case WakeupReason::Stop:
+                        state.stopped = true;
                         break;
                     case WakeupReason::Task:
                         processTasks();
+                        break;
+                    case WakeupReason::Complete:
                         break;
                     }
                 }
@@ -358,6 +444,13 @@ void State::run(void*)
                     break;
             }
         }
+        if (state.pendingProcessTasks) {
+            state.pendingProcessTasks = false;
+            processTasks();
+        }
+        if (state.stopped) {
+            break;
+        }
     }
 }
 
@@ -375,6 +468,34 @@ Napi::Promise State::runTask(Napi::Env& env,
         });
     state.wakeup(WakeupReason::Task);
     return promise;
+}
+
+void Complete(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    if (!info[0].IsArray() && !info[0].IsUndefined()) {
+        throw Napi::TypeError::New(env, "First argument needs to be an array of strings or undefined");
+    }
+
+    MutexLocker locker(&state.completion.mutex);
+    if (!state.completion.inComplete) {
+        throw Napi::TypeError::New(env, "Not completing");
+    }
+    state.completion.inComplete = false;
+    state.completion.results.clear();
+
+    if (info[0].IsArray()) {
+        const auto arr = info[0].As<Napi::Array>();
+
+        state.completion.results.reserve(arr.Length());
+
+        for (size_t i = 0; i < arr.Length(); ++i) {
+            state.completion.results.push_back(arr.Get(i).As<Napi::String>().Utf8Value());
+        }
+    }
+
+    state.wakeup(State::WakeupReason::Complete);
 }
 
 Napi::Value Start(const Napi::CallbackInfo& info)
@@ -455,11 +576,35 @@ Napi::Value Start(const Napi::CallbackInfo& info)
                     printf("promise callback: exception from js: %s\n%s\n", e.what(), e.Message().c_str());
                 }
             }
+        } else if (async == &state.completion.async) {
+            auto env = state.ctx->Env();
+
+            Napi::HandleScope scope(env);
+
+            Napi::Object obj = Napi::Object::New(env);
+            Napi::Object comp = Napi::Object::New(env);
+            {
+                MutexLocker locker(&state.completion.mutex);
+                comp.Set("buffer", Napi::String::New(env, state.completion.pending.buffer));
+                comp.Set("text", Napi::String::New(env, state.completion.pending.text));
+                comp.Set("start", Napi::Number::New(env, state.completion.pending.start));
+                comp.Set("end", Napi::Number::New(env, state.completion.pending.end));
+                comp.Set("complete", Napi::Function::New(env, Complete));
+            }
+            obj.Set("type", "completion");
+            obj.Set("completion", comp);
+
+            try {
+                state.callback.MakeCallback(state.callback.Value(), { obj }, *state.ctx);
+            } catch (const Napi::Error& e) {
+                printf("complete callback: exception from js: %s\n%s\n", e.what(), e.Message().c_str());
+            }
         }
     };
 
     uv_async_init(uv_default_loop(), &state.readline.async, handleAsync);
     uv_async_init(uv_default_loop(), &state.tasks.async, handleAsync);
+    uv_async_init(uv_default_loop(), &state.completion.async, handleAsync);
 
     uv_thread_create(&state.thread, State::run, 0);
     state.running = true;
@@ -469,7 +614,8 @@ Napi::Value Start(const Napi::CallbackInfo& info)
 
 void Stop(const Napi::CallbackInfo& info)
 {
-    auto env = info.Env();
+    state.wakeup(State::WakeupReason::Stop);
+    uv_thread_join(&state.thread);
 }
 
 Napi::Value Pause(const Napi::CallbackInfo& info)
