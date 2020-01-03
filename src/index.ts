@@ -44,6 +44,11 @@ function handleInternalCmd(cmd: string, args: string[]) {
     case "pauserl":
         handlePauseRl(cmd, args);
         return true;
+    case "exit":
+        Process.stop();
+        Readline.stop();
+        process.exit();
+        return true;
     }
 }
 

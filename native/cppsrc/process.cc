@@ -388,10 +388,14 @@ void Reader::stop(const Napi::Env& env)
     {
         std::unique_lock<std::mutex> locker(mutex);
         stopped = true;
-        thread.join();
     }
 
     int e;
+    char c = 'q';
+    EINTRWRAP(e, ::write(reader.wakeuppipe[1], &c, 1));
+
+    thread.join();
+
     EINTRWRAP(e, ::close(sigpipe[0]));
     EINTRWRAP(e, ::close(sigpipe[1]));
     sigpipe[0] = sigpipe[1] = -1;
