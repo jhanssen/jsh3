@@ -1,7 +1,5 @@
 #include "utils.h"
 
-thread_local bool Mutex::tLocked = false;
-
 // taken from https://github.com/eliben/code-for-blog/blob/master/2016/readline-samples/utils.cpp, public domain
 std::string longest_common_prefix(const std::string& s, const std::vector<std::string>& candidates)
 {

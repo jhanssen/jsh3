@@ -4,6 +4,7 @@
 #include <uv.h>
 #include <napi.h>
 #include <assert.h>
+#include <atomic>
 #include <queue>
 #include <errno.h>
 #include <string>
@@ -21,12 +22,13 @@ class Mutex
 {
 public:
     Mutex()
+        : mLocked(false)
     {
         uv_mutex_init(&mMutex);
     }
     ~Mutex()
     {
-        if (tLocked)
+        if (mLocked.load())
             unlock();
         uv_mutex_destroy(&mMutex);
     }
@@ -34,20 +36,20 @@ public:
     void lock()
     {
         uv_mutex_lock(&mMutex);
-        tLocked = true;
+        mLocked.store(true);
     }
     void unlock()
     {
-        assert(tLocked);
-        tLocked = false;
+        assert(mLocked);
+        mLocked.store(false);
         uv_mutex_unlock(&mMutex);
     }
 
-    bool locked() const { return tLocked; }
+    bool locked() const { return mLocked.load(); }
 
 private:
     uv_mutex_t mMutex;
-    thread_local static bool tLocked;
+    std::atomic<bool> mLocked;
 
     friend class Condition;
 };
