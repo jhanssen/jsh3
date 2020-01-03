@@ -55,7 +55,7 @@ function handleInternalCmd(cmd: string, args: string[]) {
 function visitCmd(node: any) {
     const args: string[] = [];
     for (const id of node.cmd) {
-        args.push(id.value);
+        args.push(id.value.toString());
     }
     const cmd = args.shift();
     if (!cmd)
