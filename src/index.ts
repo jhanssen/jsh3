@@ -151,3 +151,7 @@ Readline.readHistory(pathJoin(homedir(), ".jsh_history")).then(() => {
     console.log("history loaded", pathJoin(homedir(), ".jsh_history"));
 });
 Process.start();
+
+process.on('SIGINT', () => {
+    Readline.clear();
+});

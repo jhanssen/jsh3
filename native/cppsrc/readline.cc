@@ -49,6 +49,7 @@ struct State
     static void run(void* arg);
     static void lineHandler(char* line);
     static char** completer(const char* text, int start, int end);
+    static void forcePrompt(const std::string& prompt);
 
     void readlineInit();
     void readlineDeinit();
@@ -323,6 +324,24 @@ char** State::completer(const char* text, int start, int end)
     return nullptr;
 }
 
+void State::forcePrompt(const std::string& prompt)
+{
+    // there really must be a better way of doing this. right? right?
+    int savedPoint = rl_point;
+    int savedMark = rl_mark;
+    char* savedLine = rl_copy_text(0, rl_end);
+    rl_replace_line("", 0);
+    rl_set_prompt("");
+    rl_redisplay();
+
+    rl_replace_line(savedLine, 0);
+    rl_set_prompt(prompt.c_str());
+    rl_point = savedPoint;
+    rl_mark = savedMark;
+    rl_redisplay();
+    free(savedLine);
+}
+
 void State::readlineInit()
 {
     rl_initialize();
@@ -459,6 +478,7 @@ void State::run(void*)
             break;
         }
     }
+    state.readlineDeinit();
 }
 
 Napi::Promise State::runTask(Napi::Env& env,
@@ -679,6 +699,9 @@ Napi::Value Clear(const Napi::CallbackInfo& info)
                              rl_kill_text (rl_point, rl_end);
                              rl_mark = 0;
                              rl_reset_line_state();
+
+                             State::forcePrompt(state.prompt);
+
                              return Undefined;
                          });
 }
