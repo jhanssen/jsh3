@@ -73,7 +73,8 @@ function pathify(cmd: string): Promise<string> {
 
         for (const p of paths) {
             // should maybe do these sequentially in order to avoid races
-            stat(pathJoin(p, cmd), (err, stats) => {
+            const j = pathJoin(p, cmd);
+            stat(j, (err, stats) => {
                 if (err || !stats) {
                     reject1();
                     return;
@@ -82,7 +83,7 @@ function pathify(cmd: string): Promise<string> {
                     if ((uid === stats.uid && stats.mode & 0o100)
                         || (gids.includes(stats.gid) && stats.mode & 0o010)
                         || (stats.mode & 0o001)) {
-                        resolve(pathJoin(p, cmd));
+                        resolve(j);
                     } else {
                         reject1();
                     }
