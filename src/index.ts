@@ -3,6 +3,7 @@ import { jsh3_grammar } from "./parser"
 import { default as Readline, Data as ReadlineData, Completion as ReadlineCompletion } from "../native/readline";
 import { default as Process } from "../native/process";
 import { join as pathJoin } from "path";
+import { stat } from "fs";
 import { homedir } from "os";
 
 const jsh3Parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
@@ -14,6 +15,9 @@ const jsh3Parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar)
 //jsh3Parser.feed("./hello foo");
 //jsh3Parser.feed("./hello 1 2 | foo 3 4");
 //console.log(JSON.stringify(jsh3Parser.results, null, 4));
+
+const uid = Process.uid();
+const gids = Process.gids();
 
 function handlePauseRl(cmd: string, args: string[]) {
     const timeout = (args.length > 0 && parseInt(args[0])) || 0;
@@ -52,6 +56,44 @@ function handleInternalCmd(cmd: string, args: string[]) {
     }
 }
 
+function pathify(cmd: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        if (cmd.includes("/")) {
+            resolve(cmd);
+            return;
+        }
+        const paths = (process.env.PATH || "").split(":");
+
+        let num = 0;
+        const reject1 = () => {
+            if (++num === paths.length) {
+                reject(`File not found ${cmd}`);
+            }
+        };
+
+        for (const p of paths) {
+            // should maybe do these sequentially in order to avoid races
+            stat(pathJoin(p, cmd), (err, stats) => {
+                if (err || !stats) {
+                    reject1();
+                    return;
+                }
+                if (stats.isFile()) {
+                    if ((uid === stats.uid && stats.mode & 0o100)
+                        || (gids.includes(stats.gid) && stats.mode & 0o010)
+                        || (stats.mode & 0o001)) {
+                        resolve(pathJoin(p, cmd));
+                    } else {
+                        reject1();
+                    }
+                } else {
+                    reject1();
+                }
+            });
+        }
+    });
+}
+
 function visitCmd(node: any) {
     const args: string[] = [];
     for (const id of node.cmd) {
@@ -62,25 +104,29 @@ function visitCmd(node: any) {
         return;
     if (handleInternalCmd(cmd, args))
         return true;
-    const p = Process.launch(cmd, args);
-    p.promise.then(status => {
-        console.log("status", status);
+    pathify(cmd).then(acmd => {
+        const p = Process.launch(acmd, args);
+        p.promise.then(status => {
+            console.log("status", status);
+        }).catch(e => {
+            console.error("failed to launch", e);
+        });
+        if (p.stdinCtx) {
+            p.close(p.stdinCtx);
+        }
+        if (p.stdoutCtx) {
+            p.listen(p.stdoutCtx, (buf: Buffer) => {
+                console.log("out", buf.toString());
+            });
+        }
+        if (p.stderrCtx) {
+            p.listen(p.stderrCtx, (buf: Buffer) => {
+                console.log("err", buf.toString());
+            });
+        }
     }).catch(e => {
-        console.error("failed to launch", e);
+        console.error(e);
     });
-    if (p.stdinCtx) {
-        p.close(p.stdinCtx);
-    }
-    if (p.stdoutCtx) {
-        p.listen(p.stdoutCtx, (buf: Buffer) => {
-            console.log("out", buf.toString());
-        });
-    }
-    if (p.stderrCtx) {
-        p.listen(p.stderrCtx, (buf: Buffer) => {
-            console.log("err", buf.toString());
-        });
-    }
     //console.log(args);
     return true;
 }
