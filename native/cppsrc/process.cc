@@ -7,6 +7,7 @@
 #include <memory>
 #include <napi.h>
 #include <uv.h>
+#include <grp.h>
 #include <unistd.h>
 #include <sys/select.h>
 
@@ -726,11 +727,83 @@ Napi::Value Launch(const Napi::CallbackInfo& info)
     return launchProcess(env, proc);
 }
 
+Napi::Value Uid(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    if (!info[0].IsString()) {
+        return Napi::Number::New(env, getuid());
+    }
+
+    const auto user = info[0].As<Napi::String>().Utf8Value();
+
+    struct passwd pwd;
+    struct passwd* result;
+    char buf[16384];
+
+    getpwnam_r(user.c_str(), &pwd, buf, sizeof(buf), &result);
+    if (result == nullptr) {
+        throw Napi::TypeError::New(env, "No such user");
+    }
+
+    return Napi::Number::New(env, result->pw_uid);
+}
+
+Napi::Value Gids(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    struct passwd pwd;
+    struct passwd* result;
+    char buf[16384];
+
+    if (!info[0].IsString()) {
+        const uid_t uid = getuid();
+
+        getpwuid_r(uid, &pwd, buf, sizeof(buf), &result);
+        if (result == nullptr) {
+            throw Napi::TypeError::New(env, "No pwd entry for user");
+        }
+    } else {
+        const auto user = info[0].As<Napi::String>().Utf8Value();
+
+        getpwnam_r(user.c_str(), &pwd, buf, sizeof(buf), &result);
+        if (result == nullptr) {
+            throw Napi::TypeError::New(env, "No such user");
+        }
+    }
+
+    int groups = 20;
+    std::vector<gid_t> gids;
+    gids.resize(groups);
+
+    for (;;) {
+        const int oldg = groups;
+        const int g = getgrouplist(result->pw_name, result->pw_gid, nullptr, &groups);
+        if (g != 0) {
+            if (groups <= oldg) {
+                throw Napi::TypeError::New(env, "Can't get number of groups");
+            }
+            gids.resize(groups);
+        } else {
+            break;
+        }
+    }
+
+    Napi::Array gs = Napi::Array::New(env, groups);
+    for (int i = 0; i < groups; ++i) {
+        gs.Set(i, Napi::Number::New(env, gids[i]));
+    }
+    return gs;
+}
+
 Napi::Object Setup(Napi::Env env, Napi::Object exports)
 {
     exports.Set("start", Napi::Function::New(env, Start));
     exports.Set("stop", Napi::Function::New(env, Stop));
     exports.Set("launch", Napi::Function::New(env, Launch));
+    exports.Set("uid", Napi::Function::New(env, Uid));
+    exports.Set("gids", Napi::Function::New(env, Gids));
     return exports;
 }
 
