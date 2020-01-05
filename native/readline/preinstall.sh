@@ -1,7 +1,6 @@
 #!/bin/bash
 
 if [[ -d 3rdparty/readline ]]; then
-    npm run build
     exit 0
 fi
 
@@ -17,5 +16,3 @@ cd readline-build
 CFLAGS=-fPIC LDFLAGS=-fPIC ../readline/configure --prefix=$INSTALLPATH --disable-shared --enable-multibyte
 make
 make install
-cd ../..
-npm run build
