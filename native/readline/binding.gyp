@@ -5,7 +5,8 @@
 	"conditions": [
 	    # Define variables that points at OS-specific paths.
 	    ["OS=='mac'", {
-		"os_libs": "-lncurses"
+		"os_libs": "-lncurses",
+		"osx_ver": "<!(bash -c \"sw_vers -productVersion\")",
 	    }, {
 		"os_libs": "-ltinfo"
 	    }]
@@ -21,6 +22,7 @@
 		"xcode_settings": {
 		    "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
 		    "OTHER_CFLAGS": [ "-std=c++17"],
+		    "MACOSX_DEPLOYMENT_TARGET": "<(osx_ver)",
 		}
 	    }]
 	],

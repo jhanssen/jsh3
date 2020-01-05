@@ -1,4 +1,12 @@
 {
+    "variables" : {
+	"conditions": [
+	    # Define variables that points at OS-specific paths.
+	    ["OS=='mac'", {
+		"osx_ver": "<!(bash -c \"sw_vers -productVersion\")",
+	    }]
+	]
+    },
     "targets": [{
 	"target_name": "process_native",
 	"cflags!": [ "-fno-exceptions" ],
@@ -9,6 +17,7 @@
 		"xcode_settings": {
 		    "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
 		    "OTHER_CFLAGS": [ "-std=c++17"],
+		    "MACOSX_DEPLOYMENT_TARGET": "<(osx_ver)",
 		}
 	    }]
 	],
