@@ -80,9 +80,9 @@ function pathify(cmd: string): Promise<string> {
                     return;
                 }
                 if (stats.isFile()) {
-                    if ((uid === stats.uid && stats.mode & 0o100)
-                        || (gids.includes(stats.gid) && stats.mode & 0o010)
-                        || (stats.mode & 0o001)) {
+                    if ((uid === stats.uid && stats.mode & 0o500)
+                        || (gids.includes(stats.gid) && stats.mode & 0o050)
+                        || (stats.mode & 0o005)) {
                         resolve(j);
                     } else {
                         reject1();
