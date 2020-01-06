@@ -182,6 +182,7 @@ inline Variant toVariant(Napi::Value value)
     case napi_string:
         return Variant(value.As<Napi::String>().Utf8Value());
     }
+    return Variant(Undefined);
 }
 
 inline Napi::Value fromVariant(napi_env env, const Variant& variant)
