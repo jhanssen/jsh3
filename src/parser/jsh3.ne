@@ -13,6 +13,7 @@ const lexer = moo.states({
         lbracket: "[",
         rbracket: "]",
         nsright: { match: /[0-9]+>/, value: (s: string) => parseInt(s) },
+        srightright: ">>",
         sright: ">",
         sleft: "<",
         and: "&&",
@@ -96,7 +97,7 @@ cmd -> (variableAssignment %whitespace):* exe (%whitespace arg):* redir {% extra
 _ -> null | %whitespace {% function(d) { return null; } %}
 __ -> %whitespace {% function(d) { return null; } %}
 
-redirOut -> (%sright | %nsright) _ (%ampinteger | %identifier | %integer)
+redirOut -> (%sright | %srightright | %nsright) _ (%ampinteger | %identifier | %integer)
 redirIn -> %sleft _ (%identifier | %integer)
 redirs -> _ (redirIn | redirOut)
 redir -> null | redirs:+ {% extractRedir %}
