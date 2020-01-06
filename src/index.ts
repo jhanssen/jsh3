@@ -202,3 +202,7 @@ Process.start();
 process.on('SIGINT', () => {
     Readline.clear();
 });
+
+process.on('uncaughtException', err => {
+    Readline.log.error(err);
+});

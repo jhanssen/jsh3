@@ -14,6 +14,12 @@ export interface Data
     completion?: Completion;
 }
 
+declare interface Log
+{
+    log(...args: any): void;
+    error(...args: any): void;
+}
+
 declare function nativeCallback(data: Data): void;
 
 declare namespace Native
@@ -27,6 +33,7 @@ declare namespace Native
     export function addHistory(line: string, write?: boolean): Promise<void>;
     export function writeHistory(file: string): Promise<void>;
     export function readHistory(file: string): Promise<void>;
+    export const log: Log;
 }
 
 export default Native;

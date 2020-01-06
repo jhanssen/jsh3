@@ -794,6 +794,28 @@ Napi::Value WriteHistory(const Napi::CallbackInfo& info)
                          });
 }
 
+static void LogToFile(FILE* f, const Napi::CallbackInfo& info)
+{
+    //auto env = info.Env();
+
+    for (size_t i = 0; i < info.Length(); ++i) {
+        const auto str = info[i].ToString().Utf8Value();
+        fprintf(f, "%s ", str.c_str());
+    }
+
+    fprintf(f, "\n");
+}
+
+void Log(const Napi::CallbackInfo& info)
+{
+    LogToFile(state.redirector.stdoutFile(), info);
+}
+
+void Error(const Napi::CallbackInfo& info)
+{
+    LogToFile(state.redirector.stderrFile(), info);
+}
+
 Napi::Object Setup(Napi::Env env, Napi::Object exports)
 {
     exports.Set("start", Napi::Function::New(env, Start));
@@ -805,6 +827,13 @@ Napi::Object Setup(Napi::Env env, Napi::Object exports)
     exports.Set("addHistory", Napi::Function::New(env, AddHistory));
     exports.Set("readHistory", Napi::Function::New(env, ReadHistory));
     exports.Set("writeHistory", Napi::Function::New(env, WriteHistory));
+
+    auto log = Napi::Object::New(env);
+    log.Set("log", Napi::Function::New(env, Log));
+    log.Set("error", Napi::Function::New(env, Error));
+
+    exports.Set("log", log);
+
     return exports;
 }
 
