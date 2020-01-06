@@ -254,7 +254,7 @@ function extractConditions(d: any) {
 }
 
 function extractCmdCondition(d: any) {
-    return [d[2][1]];
+    return d[2];
 }
 
 function extractCmdMulti(d: any) {
@@ -262,7 +262,7 @@ function extractCmdMulti(d: any) {
     const helper = (sub: any) => {
         if (!sub)
             return;
-        o.push(sub[0][1]);
+        o.push(sub[0]);
         if (sub[1] instanceof Array) {
             helper(sub[1][2]);
         }
