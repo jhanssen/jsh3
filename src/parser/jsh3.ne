@@ -109,7 +109,7 @@ elifCondition -> subelifCondition {% extractElIf %}
 subelifCondition -> "elif" __ conditions _ %semi _ "then" __ cmdmulti (__ subelifCondition):?
 whileCondition -> "while" __ conditions _ %semi _ "do" __ cmdmulti __ "done" redir {% extractWhile %}
 jsCondition -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
-cmdCondition -> %lparen _ cmd _ %rparen
+cmdCondition -> %lparen _ cmd _ %rparen {% extractCmdCondition %}
 dollarCondition -> %variable
                  | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 logicalCondition -> "true" | "false"
@@ -251,6 +251,10 @@ function extractConditions(d: any) {
     };
     helper(d[0]);
     return o;
+}
+
+function extractCmdCondition(d: any) {
+    return [d[2][1]];
 }
 
 function extractCmdMulti(d: any) {
