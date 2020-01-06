@@ -103,17 +103,17 @@ redir -> null | redirs:+ {% extractRedir %}
 
 ifCondition -> "if" __ condition __ "then" __ cmd:+ (__ "elif" __ condition __ "then" __ cmd:+):* (__ "else" __ cmd:+):* __ "fi" redir {% extractIf %}
 whileCondition -> "while" __ condition __ "do" __ cmd:+ __ "done" redir
-jsCondition -> %jsstart _ jsblock:? _ %jsend
+jsCondition -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
 cmdCondition -> %lparen _ cmd _ %rparen
 dollarCondition -> %variable
-                 | %dollarvariable %variable %dollarvariableend
+                 | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 logicalCondition -> "true" | "false"
 condition -> jsCondition
            | cmdCondition
            | dollarCondition
            | logicalCondition
 
-js -> %jsstart _ jsblock:* _ %jsend {% extract024 %}
+js -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
 
 jssingleblock -> %jssingleesc
                | %jssinglecontent
@@ -136,7 +136,7 @@ singleblock -> %singleesc
 doubleblock -> %doubleesc
              | %doublestring
              | %variable
-             | %dollarvariable %variable %dollarvariableend
+             | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 singlestring -> %singlestringstart singleblock:* %singlestringend
 doublestring -> %doublestringstart doubleblock:* %doublestringend
 
@@ -149,7 +149,7 @@ variableAssignment -> key %eq value
 exe -> %identifier
      | %integer
      | %variable
-     | %dollarvariable %variable %dollarvariableend
+     | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
      | singlestring
      | doublestring
 arg -> %identifier
@@ -159,12 +159,31 @@ arg -> %identifier
      | jsblock
      | %lparen _ cmd _ %rparen
      | %variable
-     | %dollarvariable %variable %dollarvariableend
+     | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 
 @{%
 
 function extract1(d: any) {
     return d[1];
+}
+
+function extractDollarVariable(d: any) {
+    return d[1];
+}
+
+function extractJSCode(d: any) {
+    if (d[0].type !== "jsstart") {
+        throw new Error("can't find jsstart");
+    }
+    if (d[4].type !== "jsend") {
+        throw new Error("can't find jsend");
+    }
+    return [
+        { type: "jscode",
+          start: d[0].offset,
+          end: d[4].offset
+        }
+    ];
 }
 
 function extractIf(d: any) {
