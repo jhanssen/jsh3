@@ -215,8 +215,8 @@ function extractWhile(d: any) {
     const o = [];
     const entries = [];
     entries.push({ type: "condition", condition: d[2] }); // condition
-    entries.push(d[6][0][1]); // body
-    o.push({ type: "while", while: entries, redirs: d[9] });
+    entries.push(d[8]); // body
+    o.push({ type: "while", while: entries, redirs: d[11] });
     return o;
 }
 
