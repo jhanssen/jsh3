@@ -144,8 +144,8 @@ doubleblock -> %doubleesc
              | %doublestring
              | %variable
              | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
-singlestring -> %singlestringstart singleblock:* %singlestringend
-doublestring -> %doublestringstart doubleblock:* %doublestringend
+singlestring -> %singlestringstart singleblock:* %singlestringend {% extract1 %}
+doublestring -> %doublestringstart doubleblock:* %doublestringend {% extract1 %}
 
 value -> key
        | singlestring {% id %}

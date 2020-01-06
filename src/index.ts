@@ -18,6 +18,7 @@ const jsh3Parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar)
 
 const uid = Process.uid();
 const gids = Process.gids();
+const env: {[key: string]: string | undefined} = Object.assign({}, process.env);
 
 function handlePauseRl(cmd: string, args: string[]) {
     const timeout = (args.length > 0 && parseInt(args[0])) || 0;
@@ -43,6 +44,28 @@ function handlePauseRl(cmd: string, args: string[]) {
     });
 }
 
+function expandVariable(value: any) {
+    return env[value.value] || "";
+}
+
+function expand(value: any) {
+    if (typeof value === "object" && "value" in value) {
+        if (value.type === "variable") {
+            return expandVariable(value);
+        } else {
+            return value.toString();
+        }
+    }
+    if (value instanceof Array) {
+        let r = "";
+        for (const sub of value) {
+            r += expand(sub);
+        }
+        return r;
+    }
+    return value;
+}
+
 function handleInternalCmd(cmd: string, args: string[]) {
     switch (cmd) {
     case "pauserl":
@@ -53,6 +76,13 @@ function handleInternalCmd(cmd: string, args: string[]) {
         Readline.stop();
         process.exit();
         return true;
+    case "export":
+        if (args.length < 2) {
+            console.error("export needs at least two arguments");
+            return true;
+        }
+        env[args[0]] = args[1];
+        return true;
     }
 }
 
@@ -62,7 +92,7 @@ function pathify(cmd: string): Promise<string> {
             resolve(cmd);
             return;
         }
-        const paths = (process.env.PATH || "").split(":");
+        const paths = (env.PATH || "").split(":");
 
         let num = 0;
         const reject1 = () => {
@@ -98,8 +128,9 @@ function pathify(cmd: string): Promise<string> {
 function visitCmd(node: any) {
     const args: string[] = [];
     for (const id of node.cmd) {
-        args.push(id.value.toString());
+        args.push(expand(id));
     }
+    //console.log("cmmmmd", args);
     const cmd = args.shift();
     if (!cmd)
         return;
