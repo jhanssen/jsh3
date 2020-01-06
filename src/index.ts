@@ -132,6 +132,17 @@ function visitCmd(node: any) {
     return true;
 }
 
+function visitIf(node: any) {
+    visit(node.if);
+    if (node.elif) {
+        visit(node.elif);
+    }
+    if (node.else) {
+        visit(node.else);
+    }
+    return true;
+}
+
 function visit(node: any) {
     if (node instanceof Array) {
         for (const item of node) {
@@ -143,6 +154,10 @@ function visit(node: any) {
     switch (node.type) {
     case "cmd":
         if (visitCmd(node))
+            return;
+        break;
+    case "if":
+        if (visitIf(node))
             return;
         break;
     }
