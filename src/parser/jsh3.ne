@@ -26,7 +26,7 @@ const lexer = moo.states({
         star: "*",
         jsstart: { match: "{", push: "js" },
         variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
-        keyword: [/if\b/, /for\b/, /repeat\b/, /while\b/, /until\b/, /do\b/, /done\b/, /fi\b/],
+        keyword: [/if\b/, /for\b/, /repeat\b/, /while\b/, /until\b/, /do\b/, /done\b/, /fi\b/, /true\b/, /false\b/],
         doublestringstart: { match: "\"", push: "doublestringstart" },
         singlestringstart: { match: "'", push: "singlestringstart" },
         integer: { match: /[0-9]+/, value: (s: string) => parseInt(s) },
@@ -94,18 +94,24 @@ ex -> null | %ex
 cmd -> (variableAssignment %whitespace):* exe (%whitespace arg):* redir {% extractCmd %}
 
 _ -> null | %whitespace {% function(d) { return null; } %}
+__ -> %whitespace {% function(d) { return null; } %}
 
 redirOut -> (%sright | %nsright) _ (%ampinteger | %identifier | %integer)
 redirIn -> %sleft _ (%identifier | %integer)
 redirs -> _ (redirIn | redirOut)
-redir -> null | redirs:+
+redir -> null | redirs:+ {% extractRedir %}
 
-ifCondition -> "if" _ condition _ "then" _ cmd:* _ ("elif" _ condition _ "then" _ cmd:*):* _ ("else" _ cmd:*):* _ "fi" redir
-whileCondition -> "while" _ condition _ "do" _ cmd:* _ "done" redir
+ifCondition -> "if" __ condition __ "then" __ cmd:+ (__ "elif" __ condition __ "then" __ cmd:+):* (__ "else" __ cmd:+):* __ "fi" redir {% extractIf %}
+whileCondition -> "while" __ condition __ "do" __ cmd:+ __ "done" redir
 jsCondition -> %jsstart _ jsblock:? _ %jsend
 cmdCondition -> %lparen _ cmd _ %rparen
+dollarCondition -> %variable
+                 | %dollarvariable %variable %dollarvariableend
+logicalCondition -> "true" | "false"
 condition -> jsCondition
            | cmdCondition
+           | dollarCondition
+           | logicalCondition
 
 js -> %jsstart _ jsblock:* _ %jsend {% extract024 %}
 
@@ -161,6 +167,15 @@ function extract1(d: any) {
     return d[1];
 }
 
+function extractIf(d: any) {
+    const o = [];
+    const entries = [];
+    entries.push({ type: "condition", condition: d[2][0] }); // condition
+    entries.push(d[6][0][1]); // body
+    o.push({ type: "if", if: entries, redirs: d[11] });
+    return o;
+}
+
 function extractCmd(d: any) {
     const o = [];
     if (d[0] instanceof Array) {
@@ -180,11 +195,11 @@ function extractCmd(d: any) {
             entries.push(d[2][i][1][0]);
         }
     }
-    o.push({ type: "cmd", cmd: entries, redirs: extractRedirs(d[3]) });
+    o.push({ type: "cmd", cmd: entries, redirs: d[3] });
     return o;
 }
 
-function extractRedirs(d: any) {
+function extractRedir(d: any) {
     if (!d.length)
         return d;
     const o = [];
