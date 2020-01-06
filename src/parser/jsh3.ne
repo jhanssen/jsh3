@@ -104,7 +104,9 @@ redirIn -> %sleft _ (%identifier | %integer)
 redirs -> _ (redirIn | redirOut)
 redir -> null | redirs:+ {% extractRedir %}
 
-ifCondition -> "if" __ conditions _ %semi _ "then" __ cmdmulti (__ "elif" __ conditions _ %semi _ "then" __ cmdmulti):* (__ "else" __ cmdmulti):* __ "fi" redir {% extractIf %}
+ifCondition -> "if" __ conditions _ %semi _ "then" __ cmdmulti (__ elifCondition):? (__ "else" __ cmdmulti):? __ "fi" redir {% extractIf %}
+elifCondition -> subelifCondition {% extractElIf %}
+subelifCondition -> "elif" __ conditions _ %semi _ "then" __ cmdmulti (__ subelifCondition):?
 whileCondition -> "while" __ conditions _ %semi _ "do" __ cmdmulti __ "done" redir {% extractWhile %}
 jsCondition -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
 cmdCondition -> %lparen _ cmd _ %rparen
@@ -191,6 +193,24 @@ function extractJSCode(d: any) {
     ];
 }
 
+function extractElIf(d: any) {
+    const o: any[] = [];
+    const helper = (sub: any) => {
+        if (!sub)
+            return;
+        const elifEntry = [];
+        elifEntry.push({ type: "condition", condition: sub[2] });
+        elifEntry.push(sub[8]);
+        o.push({ type: "elifEntry", elifEntry: elifEntry });
+
+        if (sub[9] instanceof Array && sub[9].length > 0) {
+            helper(sub[9][1]);
+        }
+    };
+    helper(d[0]);
+    return o;
+}
+
 function extractIf(d: any) {
     const o = [];
     const ifentries = [];
@@ -198,9 +218,7 @@ function extractIf(d: any) {
     ifentries.push(d[8]); // body
     let elifentries: any[] | undefined = undefined;
     if (d[9] instanceof Array && d[9].length > 0) {
-        elifentries = [];
-        elifentries.push({ type: "condition", condition: d[9][0][3] });
-        elifentries.push(d[9][0][9]);
+        elifentries = d[9][1];
     }
     let elseentries: any[] | undefined = undefined;
     if (d[10] instanceof Array && d[10].length > 0) {
