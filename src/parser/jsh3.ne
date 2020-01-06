@@ -79,11 +79,11 @@ const lexer = moo.states({
 
 @lexer lexer
 
-cmds -> cmdamp {% extractCmdAmp %}
+cmds -> cmdamp
       | ifCondition
       | whileCondition
 
-cmdamp -> cmdsemi _ amp ex
+cmdamp -> cmdsemi _ amp ex {% extractCmdAmp %}
 cmdsemi -> cmdpipe (_ %semi _ cmdpipe):* {% extractCmdSemi %}
 cmdpipe -> cmdlogical (_ %pipe _ cmdlogical):* {% extractCmdPipe %}
 cmdlogical -> cmd (_ logical _ cmd):* {% extractCmdLogical %}
@@ -342,11 +342,12 @@ function extractCmdPipe(d: any) {
 
 function extractCmdAmp(d: any) {
     const entry = [d[0]];
+    const opts: { amp?: boolean, ex?: boolean } = {};
     if (d[2] instanceof Array && d[2].length === 1)
-        entry.push(d[2][0]);
+        opts.amp = true;
     if (d[3] instanceof Array && d[3].length === 1)
-        entry.push(d[3][0]);
-    return { type: "cmdamp", cmdamp: entry };
+        opts.ex = true;
+    return { type: "cmdamp", cmdamp: entry, opts: opts };
 }
 
 function extract024(d: any) {
