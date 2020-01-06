@@ -781,12 +781,14 @@ Napi::Value Gids(const Napi::CallbackInfo& info)
     for (;;) {
         const int oldg = groups;
         const int g = getgrouplist(result->pw_name, result->pw_gid, &gids[0], &groups);
-        if (g != 0) {
+        if (g < 0) {
             if (groups <= oldg) {
                 throw Napi::TypeError::New(env, "Can't get number of groups");
             }
             gids.resize(groups);
         } else {
+            if (g > 0)
+                groups = g;
             break;
         }
     }
