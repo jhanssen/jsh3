@@ -102,8 +102,8 @@ redirIn -> %sleft _ (%identifier | %integer)
 redirs -> _ (redirIn | redirOut)
 redir -> null | redirs:+ {% extractRedir %}
 
-ifCondition -> "if" __ condition __ "then" __ cmd:+ (__ "elif" __ condition __ "then" __ cmd:+):* (__ "else" __ cmd:+):* __ "fi" redir {% extractIf %}
-whileCondition -> "while" __ condition __ "do" __ cmd:+ __ "done" redir
+ifCondition -> "if" __ conditions __ "then" __ cmd:+ (__ "elif" __ conditions __ "then" __ cmd:+):* (__ "else" __ cmd:+):* __ "fi" redir {% extractIf %}
+whileCondition -> "while" __ conditions __ "do" __ cmd:+ __ "done" redir
 jsCondition -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
 cmdCondition -> %lparen _ cmd _ %rparen
 dollarCondition -> %variable
@@ -113,6 +113,8 @@ condition -> jsCondition
            | cmdCondition
            | dollarCondition
            | logicalCondition
+conditions -> subconditions {% extractConditions %}
+subconditions -> condition (__ logical __ subconditions):?
 
 js -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
 
@@ -190,9 +192,24 @@ function extractJSCode(d: any) {
 function extractIf(d: any) {
     const o = [];
     const entries = [];
-    entries.push({ type: "condition", condition: d[2][0] }); // condition
+    entries.push({ type: "condition", condition: d[2] }); // condition
     entries.push(d[6][0][1]); // body
     o.push({ type: "if", if: entries, redirs: d[11] });
+    return o;
+}
+
+function extractConditions(d: any) {
+    const o: any[] = [];
+    const helper = (sub: any) => {
+        if (!sub)
+            return;
+        o.push(sub[0]);
+        if (sub[1] instanceof Array && sub[1].length > 0) {
+            o.push(sub[1][1]);
+            helper(sub[1][3]);
+        }
+    };
+    helper(d[0]);
     return o;
 }
 
