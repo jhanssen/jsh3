@@ -123,7 +123,7 @@ jsbackblock -> js
              | %jsbackesc
              | %jsbackcontent
 jsblock -> js
-         | %jscode {% id %}
+         | %jscode
          | %jssinglestart jssingleblock:* %jssingleend
          | %jsdoublestart jsdoubleblock:* %jsdoubleend
          | %jsbackstart jsbackblock:* %jsbackend
