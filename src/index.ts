@@ -47,7 +47,7 @@ function handlePauseRl(cmd: string, args: string[]) {
 interface ProcessComplete {
     status: number;
     stdout: Buffer;
-    stderr: Buffer;
+    stderr: Buffer | undefined;
 };
 
 function runProcessToCompletion(args: string[]): Promise<ProcessComplete> {
@@ -58,14 +58,14 @@ function runProcessToCompletion(args: string[]): Promise<ProcessComplete> {
             return;
         }
         handleInternalCmd(cmd, args).then(arg => {
-            resolve({ status: 0, stdout: arg || Buffer.alloc(0), stderr: Buffer.alloc(0) });
+            resolve({ status: 0, stdout: arg || Buffer.alloc(0), stderr: undefined });
         }).catch(() => {
             pathify(cmd).then(acmd => {
                 const p = Process.launch(acmd, args);
-                const out = {
+                const out: ProcessComplete = {
                     status: 0,
                     stdout: Buffer.alloc(0),
-                    stderr: Buffer.alloc(0)
+                    stderr: undefined,
                 };
                 p.promise.then(status => {
                     out.status = status;
@@ -83,7 +83,11 @@ function runProcessToCompletion(args: string[]): Promise<ProcessComplete> {
                 }
                 if (p.stderrCtx) {
                     p.listen(p.stderrCtx, (buf: Buffer) => {
-                        out.stderr = Buffer.concat([out.stderr, buf]);
+                        if (out.stderr === undefined) {
+                            out.stderr = buf;
+                        } else {
+                            out.stderr = Buffer.concat([out.stderr, buf]);
+                        }
                     });
                 }
             }).catch(e => { reject(e); });
