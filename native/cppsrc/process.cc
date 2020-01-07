@@ -775,7 +775,7 @@ Napi::Value Gids(const Napi::CallbackInfo& info)
     }
 
     int groups = 20;
-    std::vector<gid_t> gids;
+    std::vector<int> gids;
     gids.resize(groups);
 
     for (;;) {
