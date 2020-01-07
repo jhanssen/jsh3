@@ -48,22 +48,26 @@ function expandVariable(value: any) {
     return env[value.value] || "";
 }
 
-function expand(value: any) {
-    if (typeof value === "object" && "value" in value) {
-        if (value.type === "variable") {
-            return expandVariable(value);
+function expand(value: any): Promise<string> {
+    return new Promise((resolve, reject) => {
+        if (typeof value === "object" && "value" in value) {
+            if (value.type === "variable") {
+                resolve(expandVariable(value));
+            } else {
+                resolve(value.toString());
+            }
+        }
+        if (value instanceof Array) {
+            let r = "";
+            const ps = [];
+            for (const sub of value) {
+                ps.push(expand(sub).then(val => r += val));
+            }
+            Promise.all(ps).then(() => { resolve(r); }).catch(e => { reject(e); });
         } else {
-            return value.toString();
+            resolve(value);
         }
-    }
-    if (value instanceof Array) {
-        let r = "";
-        for (const sub of value) {
-            r += expand(sub);
-        }
-        return r;
-    }
-    return value;
+    });
 }
 
 function handleInternalCmd(cmd: string, args: string[]) {
@@ -126,36 +130,41 @@ function pathify(cmd: string): Promise<string> {
 }
 
 function visitCmd(node: any) {
+    const ps = [];
     const args: string[] = [];
     for (const id of node.cmd) {
-        args.push(expand(id));
+        ps.push(expand(id).then(arg => args.push(arg)));
     }
-    //console.log("cmmmmd", args);
-    const cmd = args.shift();
-    if (!cmd)
-        return;
-    if (handleInternalCmd(cmd, args))
-        return true;
-    pathify(cmd).then(acmd => {
-        const p = Process.launch(acmd, args);
-        p.promise.then(status => {
-            console.log("status", status);
+    Promise.all(ps).then(() => {
+        console.log("cmmmmd", args);
+        const cmd = args.shift();
+        if (!cmd)
+            return;
+        if (handleInternalCmd(cmd, args))
+            return true;
+        pathify(cmd).then(acmd => {
+            const p = Process.launch(acmd, args);
+            p.promise.then(status => {
+                console.log("status", status);
+            }).catch(e => {
+                console.error("failed to launch", e);
+            });
+            if (p.stdinCtx) {
+                p.close(p.stdinCtx);
+            }
+            if (p.stdoutCtx) {
+                p.listen(p.stdoutCtx, (buf: Buffer) => {
+                    console.log("out", buf.toString());
+                });
+            }
+            if (p.stderrCtx) {
+                p.listen(p.stderrCtx, (buf: Buffer) => {
+                    console.log("err", buf.toString());
+                });
+            }
         }).catch(e => {
-            console.error("failed to launch", e);
+            console.error(e);
         });
-        if (p.stdinCtx) {
-            p.close(p.stdinCtx);
-        }
-        if (p.stdoutCtx) {
-            p.listen(p.stdoutCtx, (buf: Buffer) => {
-                console.log("out", buf.toString());
-            });
-        }
-        if (p.stderrCtx) {
-            p.listen(p.stderrCtx, (buf: Buffer) => {
-                console.log("err", buf.toString());
-            });
-        }
     }).catch(e => {
         console.error(e);
     });

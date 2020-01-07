@@ -164,7 +164,7 @@ arg -> %identifier
      | singlestring
      | doublestring
      | jsblock
-     | %lparen _ cmd _ %rparen
+     | %lparen _ cmd _ %rparen {% extract2a %}
      | %variable
      | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 
@@ -172,6 +172,10 @@ arg -> %identifier
 
 function extract1(d: any) {
     return d[1];
+}
+
+function extract2a(d: any) {
+    return [d[2]];
 }
 
 function extractDollarVariable(d: any) {
@@ -272,16 +276,15 @@ function extractCmdMulti(d: any) {
 }
 
 function extractCmd(d: any) {
-    const o = [];
-    if (d[0] instanceof Array) {
-        const a = [];
+    let a: any[] | undefined = undefined;
+    if (d[0] instanceof Array && d[0].length > 0) {
+        a = [];
         for (let i = 0; i < d[0].length; ++i) {
             const v = d[0][i][0][2];
             a.push({ type: "assignment",
                      key: d[0][i][0][0][0],
                      value: v.length === 1 ? v[0][0] : v });
         }
-        o.push(a);
     }
     const entries = [];
     entries.push(d[1][0]);
@@ -290,7 +293,7 @@ function extractCmd(d: any) {
             entries.push(d[2][i][1][0]);
         }
     }
-    o.push({ type: "cmd", cmd: entries, redirs: d[3] });
+    const o = [{ type: "cmd", assignments: a, cmd: entries, redirs: d[3] }];
     return o;
 }
 
