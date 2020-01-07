@@ -775,7 +775,11 @@ Napi::Value Gids(const Napi::CallbackInfo& info)
     }
 
     int groups = 20;
+#ifdef __APPLE__
     std::vector<int> gids;
+#else
+    std::vector<gid_t> gids;
+#endif
     gids.resize(groups);
 
     for (;;) {
