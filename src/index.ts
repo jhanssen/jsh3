@@ -94,11 +94,10 @@ function expandVariable(value: any) {
 function expandCmd(value: any): Promise<string> {
     return new Promise((resolve, reject) => {
         const ps = [];
-        const args: string[] = [];
         for (const id of value.cmd) {
-            ps.push(expand(id).then(arg => args.push(arg)));
+            ps.push(expand(id));
         }
-        Promise.all(ps).then(() => {
+        Promise.all(ps).then(args => {
             runProcessToCompletion(args).then(out => {
                 resolve(out.stdout.toString());
             });
@@ -120,12 +119,11 @@ function expand(value: any): Promise<string> {
             }
         }
         if (value instanceof Array) {
-            let r = "";
             const ps = [];
             for (const sub of value) {
-                ps.push(expand(sub).then(val => r += val));
+                ps.push(expand(sub));
             }
-            Promise.all(ps).then(() => { resolve(r); }).catch(e => { reject(e); });
+            Promise.all(ps).then(results => { resolve(results.join("")); }).catch(e => { reject(e); });
         } else {
             resolve(value);
         }
@@ -193,11 +191,10 @@ function pathify(cmd: string): Promise<string> {
 
 function visitCmd(node: any) {
     const ps = [];
-    const args: string[] = [];
     for (const id of node.cmd) {
-        ps.push(expand(id).then(arg => args.push(arg)));
+        ps.push(expand(id));
     }
-    Promise.all(ps).then(() => {
+    Promise.all(ps).then(args => {
         //console.log("cmmmmd", args);
         const cmd = args.shift();
         if (!cmd)
