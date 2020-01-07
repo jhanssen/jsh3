@@ -1,7 +1,7 @@
-declare interface InCtx {}
-declare interface OutCtx {}
+export interface InCtx {}
+export interface OutCtx {}
 
-declare interface Launch
+export interface Launch
 {
     promise: Promise<number>;
     write:(ctx: InCtx, buffer?: Buffer) => void;

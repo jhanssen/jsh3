@@ -1,6 +1,7 @@
 import * as nearley from "nearley"
 import { jsh3_grammar } from "./parser"
 import { default as Readline, Data as ReadlineData, Completion as ReadlineCompletion } from "../native/readline";
+import { readProcess, ReadProcess } from "./process";
 import { default as Process } from "../native/process";
 import { join as pathJoin } from "path";
 import { stat } from "fs";
@@ -44,13 +45,7 @@ function handlePauseRl(cmd: string, args: string[]) {
     });
 }
 
-interface ProcessComplete {
-    status: number;
-    stdout: Buffer;
-    stderr: Buffer | undefined;
-};
-
-function runProcessToCompletion(args: string[]): Promise<ProcessComplete> {
+function runProcessToCompletion(args: string[]): Promise<ReadProcess> {
     return new Promise((resolve, reject) => {
         const cmd = args.shift();
         if (!cmd) {
@@ -61,35 +56,11 @@ function runProcessToCompletion(args: string[]): Promise<ProcessComplete> {
             resolve({ status: 0, stdout: arg || Buffer.alloc(0), stderr: undefined });
         }).catch(() => {
             pathify(cmd).then(acmd => {
-                const p = Process.launch(acmd, args);
-                const out: ProcessComplete = {
-                    status: 0,
-                    stdout: Buffer.alloc(0),
-                    stderr: undefined,
-                };
-                p.promise.then(status => {
-                    out.status = status;
+                readProcess(acmd, args).then(out => {
                     resolve(out);
                 }).catch(e => {
                     reject(e);
                 });
-                if (p.stdinCtx) {
-                    p.close(p.stdinCtx);
-                }
-                if (p.stdoutCtx) {
-                    p.listen(p.stdoutCtx, (buf: Buffer) => {
-                        out.stdout = Buffer.concat([out.stdout, buf]);
-                    });
-                }
-                if (p.stderrCtx) {
-                    p.listen(p.stderrCtx, (buf: Buffer) => {
-                        if (out.stderr === undefined) {
-                            out.stderr = buf;
-                        } else {
-                            out.stderr = Buffer.concat([out.stderr, buf]);
-                        }
-                    });
-                }
             }).catch(e => { reject(e); });
         });
     });
@@ -107,7 +78,7 @@ function expandCmd(value: any): Promise<string> {
         }
         Promise.all(ps).then(args => {
             runProcessToCompletion(args).then(out => {
-                resolve(out.stdout.toString());
+                resolve((out.stdout || "").toString());
             });
         }).catch(e => { reject(e); });
     });
@@ -219,25 +190,11 @@ function visitCmd(node: any) {
             console.log((arg && arg.toString()) || "");
         }).catch(() => {
             pathify(cmd).then(acmd => {
-                const p = Process.launch(acmd, args);
-                p.promise.then(status => {
-                    console.log("status", status);
+                readProcess(acmd, args).then(out => {
+                    console.log((out.stdout || "").toString());
                 }).catch(e => {
-                    console.error("failed to launch", e);
+                    console.error(e);
                 });
-                if (p.stdinCtx) {
-                    p.close(p.stdinCtx);
-                }
-                if (p.stdoutCtx) {
-                    p.listen(p.stdoutCtx, (buf: Buffer) => {
-                        console.log("out", buf.toString());
-                    });
-                }
-                if (p.stderrCtx) {
-                    p.listen(p.stderrCtx, (buf: Buffer) => {
-                        console.log("err", buf.toString());
-                    });
-                }
             }).catch(e => {
                 console.error(e);
             });
