@@ -35,7 +35,7 @@ const lexer = moo.states({
         doublestringstart: { match: "\"", push: "doublestringstart" },
         singlestringstart: { match: "'", push: "singlestringstart" },
         integer: { match: /[0-9]+/, value: (s: string) => parseInt(s) },
-        identifier: /[a-zA-Z0-9_./]+/
+        identifier: /[a-zA-Z0-9\-_./]+/
     },
     singlestringstart: {
         singleesc: /\\./,
