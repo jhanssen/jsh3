@@ -57,33 +57,37 @@ function runProcessToCompletion(args: string[]): Promise<ProcessComplete> {
             reject("No command");
             return;
         }
-        pathify(cmd).then(acmd => {
-            const p = Process.launch(acmd, args);
-            const out = {
-                status: 0,
-                stdout: Buffer.alloc(0),
-                stderr: Buffer.alloc(0)
-            };
-            p.promise.then(status => {
-                out.status = status;
-                resolve(out);
-            }).catch(e => {
-                reject(e);
-            });
-            if (p.stdinCtx) {
-                p.close(p.stdinCtx);
-            }
-            if (p.stdoutCtx) {
-                p.listen(p.stdoutCtx, (buf: Buffer) => {
-                    out.stdout = Buffer.concat([out.stdout, buf]);
+        handleInternalCmd(cmd, args).then(arg => {
+            resolve({ status: 0, stdout: arg || Buffer.alloc(0), stderr: Buffer.alloc(0) });
+        }).catch(() => {
+            pathify(cmd).then(acmd => {
+                const p = Process.launch(acmd, args);
+                const out = {
+                    status: 0,
+                    stdout: Buffer.alloc(0),
+                    stderr: Buffer.alloc(0)
+                };
+                p.promise.then(status => {
+                    out.status = status;
+                    resolve(out);
+                }).catch(e => {
+                    reject(e);
                 });
-            }
-            if (p.stderrCtx) {
-                p.listen(p.stderrCtx, (buf: Buffer) => {
-                    out.stderr = Buffer.concat([out.stderr, buf]);
-                });
-            }
-        }).catch(e => { reject(e); });
+                if (p.stdinCtx) {
+                    p.close(p.stdinCtx);
+                }
+                if (p.stdoutCtx) {
+                    p.listen(p.stdoutCtx, (buf: Buffer) => {
+                        out.stdout = Buffer.concat([out.stdout, buf]);
+                    });
+                }
+                if (p.stderrCtx) {
+                    p.listen(p.stderrCtx, (buf: Buffer) => {
+                        out.stderr = Buffer.concat([out.stderr, buf]);
+                    });
+                }
+            }).catch(e => { reject(e); });
+        });
     });
 }
 
@@ -130,24 +134,32 @@ function expand(value: any): Promise<string> {
     });
 }
 
-function handleInternalCmd(cmd: string, args: string[]) {
-    switch (cmd) {
-    case "pauserl":
-        handlePauseRl(cmd, args);
-        return true;
-    case "exit":
-        Process.stop();
-        Readline.stop();
-        process.exit();
-        return true;
-    case "export":
-        if (args.length < 2) {
-            console.error("export needs at least two arguments");
-            return true;
+function handleInternalCmd(cmd: string, args: string[]): Promise<Buffer | undefined> {
+    return new Promise((resolve, reject) => {
+        switch (cmd) {
+        case "pauserl":
+            handlePauseRl(cmd, args);
+            resolve();
+            break;
+        case "exit":
+            Process.stop();
+            Readline.stop();
+            process.exit();
+            resolve();
+            break;
+        case "export":
+            if (args.length < 2) {
+                resolve(Buffer.from("export needs at least two arguments"));
+                return true;
+            }
+            env[args[0]] = args[1];
+            resolve();
+            break;
+        default:
+            reject();
+            break;
         }
-        env[args[0]] = args[1];
-        return true;
-    }
+    });
 }
 
 function pathify(cmd: string): Promise<string> {
@@ -199,30 +211,32 @@ function visitCmd(node: any) {
         const cmd = args.shift();
         if (!cmd)
             return;
-        if (handleInternalCmd(cmd, args))
-            return true;
-        pathify(cmd).then(acmd => {
-            const p = Process.launch(acmd, args);
-            p.promise.then(status => {
-                console.log("status", status);
+        handleInternalCmd(cmd, args).then(arg => {
+            console.log((arg && arg.toString()) || "");
+        }).catch(() => {
+            pathify(cmd).then(acmd => {
+                const p = Process.launch(acmd, args);
+                p.promise.then(status => {
+                    console.log("status", status);
+                }).catch(e => {
+                    console.error("failed to launch", e);
+                });
+                if (p.stdinCtx) {
+                    p.close(p.stdinCtx);
+                }
+                if (p.stdoutCtx) {
+                    p.listen(p.stdoutCtx, (buf: Buffer) => {
+                        console.log("out", buf.toString());
+                    });
+                }
+                if (p.stderrCtx) {
+                    p.listen(p.stderrCtx, (buf: Buffer) => {
+                        console.log("err", buf.toString());
+                    });
+                }
             }).catch(e => {
-                console.error("failed to launch", e);
+                console.error(e);
             });
-            if (p.stdinCtx) {
-                p.close(p.stdinCtx);
-            }
-            if (p.stdoutCtx) {
-                p.listen(p.stdoutCtx, (buf: Buffer) => {
-                    console.log("out", buf.toString());
-                });
-            }
-            if (p.stderrCtx) {
-                p.listen(p.stderrCtx, (buf: Buffer) => {
-                    console.log("err", buf.toString());
-                });
-            }
-        }).catch(e => {
-            console.error(e);
         });
     }).catch(e => {
         console.error(e);
