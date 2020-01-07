@@ -44,17 +44,79 @@ function handlePauseRl(cmd: string, args: string[]) {
     });
 }
 
+interface ProcessComplete {
+    status: number;
+    stdout: Buffer;
+    stderr: Buffer;
+};
+
+function runProcessToCompletion(args: string[]): Promise<ProcessComplete> {
+    return new Promise((resolve, reject) => {
+        const cmd = args.shift();
+        if (!cmd) {
+            reject("No command");
+            return;
+        }
+        pathify(cmd).then(acmd => {
+            const p = Process.launch(acmd, args);
+            const out = {
+                status: 0,
+                stdout: Buffer.alloc(0),
+                stderr: Buffer.alloc(0)
+            };
+            p.promise.then(status => {
+                out.status = status;
+                resolve(out);
+            }).catch(e => {
+                reject(e);
+            });
+            if (p.stdinCtx) {
+                p.close(p.stdinCtx);
+            }
+            if (p.stdoutCtx) {
+                p.listen(p.stdoutCtx, (buf: Buffer) => {
+                    out.stdout = Buffer.concat([out.stdout, buf]);
+                });
+            }
+            if (p.stderrCtx) {
+                p.listen(p.stderrCtx, (buf: Buffer) => {
+                    out.stderr = Buffer.concat([out.stderr, buf]);
+                });
+            }
+        }).catch(e => { reject(e); });
+    });
+}
+
 function expandVariable(value: any) {
     return env[value.value] || "";
 }
 
+function expandCmd(value: any): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const ps = [];
+        const args: string[] = [];
+        for (const id of value.cmd) {
+            ps.push(expand(id).then(arg => args.push(arg)));
+        }
+        Promise.all(ps).then(() => {
+            runProcessToCompletion(args).then(out => {
+                resolve(out.stdout.toString());
+            });
+        }).catch(e => { reject(e); });
+    });
+}
+
 function expand(value: any): Promise<string> {
     return new Promise((resolve, reject) => {
-        if (typeof value === "object" && "value" in value) {
+        if (typeof value === "object" && "type" in value) {
             if (value.type === "variable") {
                 resolve(expandVariable(value));
+            } else if (value.type === "cmd") {
+                resolve(expandCmd(value));
+            } else if (value.value !== undefined) {
+                resolve(value.value.toString());
             } else {
-                resolve(value.toString());
+                resolve(value);
             }
         }
         if (value instanceof Array) {
@@ -136,7 +198,7 @@ function visitCmd(node: any) {
         ps.push(expand(id).then(arg => args.push(arg)));
     }
     Promise.all(ps).then(() => {
-        console.log("cmmmmd", args);
+        //console.log("cmmmmd", args);
         const cmd = args.shift();
         if (!cmd)
             return;
