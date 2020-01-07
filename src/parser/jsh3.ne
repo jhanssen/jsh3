@@ -14,14 +14,18 @@ const lexer = moo.states({
         rbracket: "]",
         nsright: { match: /[0-9]+>/, value: (s: string) => parseInt(s) },
         srightright: ">>",
+        srightgr: ">=",
         sright: ">",
+        sleftgr: "<=",
         sleft: "<",
         and: "&&",
         or: "||",
         ampinteger: { match: /&[0-9+]+/, value: (s: string) => parseInt(s.slice(1)) },
         amp: "&",
-        ex: "!",
+        eqeq: "==",
+        neq: "!=",
         eq: "=",
+        ex: "!",
         semi: ";",
         pipe: "|",
         star: "*",
@@ -113,12 +117,22 @@ cmdCondition -> %lparen _ cmd _ %rparen {% extractCmdCondition %}
 dollarCondition -> %variable
                  | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 logicalCondition -> "true" | "false"
+compare -> %srightgr
+         | %sright
+         | %sleftgr
+         | %sleft
+         | %eqeq
+         | %neq
 condition -> jsCondition
            | cmdCondition
            | dollarCondition
            | logicalCondition
+           | singlestring
+           | doublestring
+           | %identifier
+           | %integer
 conditions -> subconditions {% extractConditions %}
-subconditions -> condition (__ logical __ subconditions):?
+subconditions -> condition (_ compare _ condition):? (__ logical __ subconditions):?
 
 js -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
 
@@ -247,10 +261,18 @@ function extractConditions(d: any) {
     const helper = (sub: any) => {
         if (!sub)
             return;
-        o.push(sub[0]);
+        const no = [];
+        no.push(sub[0]);
         if (sub[1] instanceof Array && sub[1].length > 0) {
-            o.push(sub[1][1]);
-            helper(sub[1][3]);
+            // comparison
+            no.push(sub[1][1][0]); // operator
+            no.push(sub[1][3][0]); // operand
+        }
+        o.push(no);
+        if (sub[2] instanceof Array && sub[2].length > 0) {
+            // logical
+            o.push(sub[2][1]);
+            helper(sub[2][3]);
         }
     };
     helper(d[0]);
