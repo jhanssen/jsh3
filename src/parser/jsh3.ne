@@ -86,6 +86,7 @@ const lexer = moo.states({
 cmds -> cmdamp
       | ifCondition
       | whileCondition
+      | jsCondition
 
 cmdamp -> cmdsemi _ amp ex {% extractCmdAmp %}
 cmdsemi -> cmdpipe (_ %semi _ cmdpipe):* {% extractCmdSemi %}
@@ -112,7 +113,7 @@ ifCondition -> "if" __ conditions _ %semi _ "then" __ cmdmulti (__ elifCondition
 elifCondition -> subelifCondition {% extractElIf %}
 subelifCondition -> "elif" __ conditions _ %semi _ "then" __ cmdmulti (__ subelifCondition):?
 whileCondition -> "while" __ conditions _ %semi _ "do" __ cmdmulti __ "done" redir {% extractWhile %}
-jsCondition -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
+jsCondition -> js
 cmdCondition -> %lparen _ cmd _ %rparen {% extractCmdCondition %}
 dollarCondition -> %variable
                  | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
@@ -134,7 +135,7 @@ condition -> jsCondition
 conditions -> subconditions {% extractConditions %}
 subconditions -> condition (_ compare _ condition):? (__ logical __ subconditions):?
 
-js -> %jsstart _ jsblock:? _ %jsend {% extractJSCode %}
+js -> jsblock {% extractJSCode %}
 
 jssingleblock -> %jssingleesc
                | %jssinglecontent
@@ -143,11 +144,12 @@ jsdoubleblock -> %jsdoubleesc
 jsbackblock -> js
              | %jsbackesc
              | %jsbackcontent
-jsblock -> js
-         | %jscode
-         | %jssinglestart jssingleblock:* %jssingleend
-         | %jsdoublestart jsdoubleblock:* %jsdoubleend
-         | %jsbackstart jsbackblock:* %jsbackend
+jsblock -> %jsstart _ (jspart):* _ %jsend
+jspart -> jsblock
+        | %jscode
+        | %jssinglestart jssingleblock:* %jssingleend
+        | %jsdoublestart jsdoubleblock:* %jsdoubleend
+        | %jsbackstart jsbackblock:* %jsbackend
 
 key -> %identifier
      | %integer
@@ -197,16 +199,16 @@ function extractDollarVariable(d: any) {
 }
 
 function extractJSCode(d: any) {
-    if (d[0].type !== "jsstart") {
+    if (d[0][0].type !== "jsstart") {
         throw new Error("can't find jsstart");
     }
-    if (d[4].type !== "jsend") {
+    if (d[0][4].type !== "jsend") {
         throw new Error("can't find jsend");
     }
     return [
         { type: "jscode",
-          start: d[0].offset,
-          end: d[4].offset
+          start: d[0][0].offset,
+          end: d[0][4].offset
         }
     ];
 }
