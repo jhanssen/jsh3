@@ -219,13 +219,6 @@ void Reader::start(const Napi::Env& env)
                           std::swap(dp, reader.doneprocs);
                           std::swap(pe, reader.pendingemitters);
                       }
-                      for (const auto& p : dp) {
-                          auto env = p->promise->promise.Env();
-                          Napi::HandleScope scope(env);
-                          Napi::CallbackScope callback(env, p->promise->ctx);
-
-                          p->promise->promise.Resolve(Napi::Number::New(env, p->status));
-                      }
                       for (const auto& e : pe) {
                           if (e->async) {
                               auto env = e->async->listener.Env();
@@ -246,6 +239,13 @@ void Reader::start(const Napi::Env& env)
                                   e->pending.push_back(std::move(str));
                               }
                           }
+                      }
+                      for (const auto& p : dp) {
+                          auto env = p->promise->promise.Env();
+                          Napi::HandleScope scope(env);
+                          Napi::CallbackScope callback(env, p->promise->ctx);
+
+                          p->promise->promise.Resolve(Napi::Number::New(env, p->status));
                       }
                   });
 
