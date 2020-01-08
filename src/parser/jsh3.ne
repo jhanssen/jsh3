@@ -12,6 +12,7 @@ const lexer = moo.states({
         rparen: ")",
         lbracket: "[",
         rbracket: "]",
+        comma: ",",
         nsright: { match: /[0-9]+>/, value: (s: string) => parseInt(s) },
         srightright: ">>",
         srightgr: ">=",
@@ -135,7 +136,7 @@ condition -> jsCondition
 conditions -> subconditions {% extractConditions %}
 subconditions -> condition (_ compare _ condition):? (__ logical __ subconditions):?
 
-js -> jsblock {% extractJSCode %}
+js -> jsblock (%lparen argnojs (_ %comma _ argnojs):* %rparen):? {% extractJSCode %}
 
 jssingleblock -> %jssingleesc
                | %jssinglecontent
@@ -183,6 +184,13 @@ arg -> %identifier
      | %lparen _ cmd _ %rparen {% extract2a %}
      | %variable
      | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
+argnojs -> %identifier
+         | %integer
+         | singlestring
+         | doublestring
+         | %lparen _ cmd _ %rparen {% extract2a %}
+         | %variable
+         | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 
 @{%
 
@@ -205,10 +213,20 @@ function extractJSCode(d: any) {
     if (d[0][4].type !== "jsend") {
         throw new Error("can't find jsend");
     }
+    const args = [];
+    if (d[1] instanceof Array && d[1].length > 0) {
+        args.push(d[1][1][0]);
+        if (d[1][2] instanceof Array && d[1][2].length > 0) {
+            for (let i = 0; i < d[1][2].length; ++i) {
+                args.push(d[1][2][i][3][0]);
+            }
+        }
+    }
     return [
         { type: "jscode",
           start: d[0][0].offset,
-          end: d[0][4].offset
+          end: d[0][4].offset,
+          args: args.length > 0 ? args : undefined
         }
     ];
 }

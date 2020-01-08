@@ -6,6 +6,7 @@ import { default as Process } from "../native/process";
 import { join as pathJoin } from "path";
 import { stat } from "fs";
 import { homedir } from "os";
+import { runInNewContext } from "vm";
 
 const jsh3Parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
 
@@ -78,7 +79,7 @@ function expandCmd(value: any): Promise<string> {
         }
         Promise.all(ps).then(args => {
             runProcessToCompletion(args).then(out => {
-                resolve((out.stdout || "").toString());
+                resolve((out.stdout || "").toString().trimEnd());
             });
         }).catch(e => { reject(e); });
     });
@@ -206,21 +207,47 @@ function visitCmd(node: any) {
     return true;
 }
 
-function visitIf(node: any) {
-    visit(node.if);
+function visitIf(node: any, line: string) {
+    visit(node.if, line);
     if (node.elif) {
-        visit(node.elif);
+        visit(node.elif, line);
     }
     if (node.else) {
-        visit(node.else);
+        visit(node.else, line);
     }
     return true;
 }
 
-function visit(node: any) {
+function runJS(code: string, args?: string[]) {
+    const ctx = {
+        args: args || []
+    };
+    return runInNewContext(code, ctx);
+}
+
+function visitJS(node: any, line: string) {
+    const jscode = line.substr(node.start + 1, node.end - node.start - 1);
+    // resolve arguments if any
+    if (node.args instanceof Array) {
+        const ps: Promise<string>[] = [];
+        for (const arg of node.args) {
+            ps.push(expand(arg));
+        }
+        Promise.all(ps).then(args => {
+            const r = runJS(jscode, args);
+            console.log(r);
+        }).catch(e => {
+            console.error(e);
+        });
+    } else {
+        runJS(jscode);
+    }
+}
+
+function visit(node: any, line: string) {
     if (node instanceof Array) {
         for (const item of node) {
-            visit(item);
+            visit(item, line);
         }
         return;
     }
@@ -230,8 +257,11 @@ function visit(node: any) {
         if (visitCmd(node))
             return;
         break;
+    case "jscode":
+        visitJS(node, line);
+        return;
     case "if":
-        if (visitIf(node))
+        if (visitIf(node, line))
             return;
         break;
     }
@@ -239,7 +269,7 @@ function visit(node: any) {
     const data = node[node.type];
     if (data instanceof Array) {
         for (const item of data) {
-            visit(item);
+            visit(item, line);
         }
     }
 }
