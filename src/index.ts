@@ -240,7 +240,8 @@ function visitJS(node: any, line: string) {
             console.error(e);
         });
     } else {
-        runJS(jscode);
+        const r = runJS(jscode);
+        console.log(r);
     }
 }
 
