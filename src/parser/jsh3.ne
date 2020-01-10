@@ -84,13 +84,13 @@ const lexer = moo.states({
 
 @lexer lexer
 
-cmds -> cmdamp
+cmds -> cmdsep
       | ifCondition
       | whileCondition
       | jsCondition
+      | subshell
 
-cmdamp -> cmdsemi _ amp ex {% extractCmdAmp %}
-cmdsemi -> cmdlogical (_ %semi _ cmdlogical):* {% extractCmdSemi %}
+cmdsep -> cmdlogical (_ (%semi | (%amp %ex:?)) _ cmdlogical):* {% extractCmdSep %}
 cmdlogical -> cmdpipe (_ logical _ cmdpipe):* {% extractCmdLogical %}
 cmdpipe -> cmd (_ %pipe _ cmd):* {% extractCmdPipe %}
 
@@ -115,8 +115,6 @@ elifCondition -> subelifCondition {% extractElIf %}
 subelifCondition -> "elif" __ conditions _ %semi _ "then" __ cmdmulti (__ subelifCondition):?
 whileCondition -> "while" __ conditions _ %semi _ "do" __ cmdmulti __ "done" redir {% extractWhile %}
 jsCondition -> js
-cmdCondition -> %lparen _ cmd _ %rparen {% extractCmdCondition %}
-dollarCmdCondition -> %dollarlparen _ cmd _ %rparen {% extractDollarCmdCondition %}
 dollarCondition -> %variable
                  | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 logicalCondition -> "true" | "false"
@@ -127,8 +125,8 @@ compare -> %srightgr
          | %eqeq
          | %neq
 condition -> jsCondition
-           | cmdCondition
-           | dollarCmdCondition
+           | subshell
+           | subshellout
            | dollarCondition
            | logicalCondition
            | singlestring
@@ -137,7 +135,8 @@ condition -> jsCondition
            | %integer
 conditions -> subconditions {% extractConditions %}
 subconditions -> condition (_ compare _ condition):? (__ logical __ subconditions):?
-
+subshell -> %lparen _ cmds _ %rparen {% extractSubshell %}
+subshellout -> %dollarlparen _ cmds _ %rparen {% extractSubshellOut %}
 js -> jsblock (%lparen argnojs (_ %comma _ argnojs):* %rparen):? {% extractJSCode %}
 
 jssingleblock -> %jssingleesc
@@ -167,6 +166,9 @@ singlestring -> %singlestringstart singleblock:* %singlestringend {% extract1 %}
 doublestring -> %doublestringstart doubleblock:* %doublestringend {% extract1 %}
 
 value -> key
+       | subshell
+       | subshellout
+       | js
        | singlestring {% id %}
        | doublestring {% id %}
 
@@ -183,16 +185,16 @@ arg -> %identifier
      | singlestring
      | doublestring
      | jsblock
-     | %lparen _ cmd _ %rparen {% extract2a %}
-     | %dollarlparen _ cmd _ %rparen {% extractDollarCmd %}
+     | subshell
+     | subshellout
      | %variable
      | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 argnojs -> %identifier
          | %integer
          | singlestring
          | doublestring
-         | %lparen _ cmd _ %rparen {% extract2a %}
-         | %dollarlparen _ cmd _ %rparen {% extractDollarCmd %}
+         | subshell
+         | subshellout
          | %variable
          | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 
@@ -204,10 +206,6 @@ function extract1(d: any) {
 
 function extract2a(d: any) {
     return [d[2]];
-}
-
-function extractDollarCmd(d: any) {
-    return [{ type: "dollarcmd", cmd: d[2] }];
 }
 
 function extractDollarVariable(d: any) {
@@ -307,12 +305,12 @@ function extractConditions(d: any) {
     return o;
 }
 
-function extractCmdCondition(d: any) {
-    return d[2];
+function extractSubshell(d: any){
+    return [{ type: "subshell", subshell: d[2] }];
 }
 
-function extractDollarCmdCondition(d: any) {
-    return [{ type: "dollarcmd", cmd: d[2] }];
+function extractSubshellOut(d: any) {
+    return [{ type: "subshellOut", subshellOut: d[2] }];
 }
 
 function extractCmdMulti(d: any) {
@@ -366,14 +364,46 @@ function extractRedir(d: any) {
     return o;
 }
 
-function extractCmdSemi(d: any) {
+function merge(entries: any[], type: string, data: any) {
+    let last: any | undefined;
+    const traverse = (e: any) => {
+        if (typeof e === "object" && e !== null) {
+            if (e instanceof Array) {
+                for (const ee of e) {
+                    traverse(ee);
+                }
+            } else {
+                if (e.type === type) {
+                    last = e;
+                }
+                for (const [k, ee] of Object.entries(e)) {
+                    traverse(ee);
+                }
+            }
+        }
+    };
+    traverse(entries);
+    if (last) {
+        Object.assign(last, data);
+    }
+}
+
+function extractCmdSep(d: any) {
     const entries = [d[0]];
     if (d[1] instanceof Array) {
         for (let i = 0; i < d[1].length; ++i) {
+            if (d[1][i][1][0] instanceof Array) {
+                if (d[1][i][1][0][0].type === "amp") {
+                    merge(entries, "cmd", { amp: true });
+                }
+                if (d[1][i][1][0][1] !== null && d[1][i][1][0][1].type === "ex") {
+                    merge(entries, "cmd", { ex: true });
+                }
+            }
             entries.push(d[1][i][3]);
         }
     }
-    return { type: "semi", semi: entries };
+    return { type: "sep", sep: entries };
 }
 
 function extractCmdLogical(d: any) {
