@@ -38,8 +38,16 @@ struct BufferEmitter : public std::enable_shared_from_this<BufferEmitter>
     };
     std::shared_ptr<Async> async;
 
+    static Napi::Value makeBuffer(const Napi::Env& env, std::string&& str);
+
     void emit(std::string&& data);
 };
+
+inline Napi::Value BufferEmitter::makeBuffer(const Napi::Env& env, std::string&& str)
+{
+    char* data = strndup(&str[0], str.size());
+    return Napi::Buffer<char>::New(env, data, str.size(), [](const Napi::Env&, char* d) { free(d); });
+}
 
 struct Process
 {
@@ -228,7 +236,7 @@ void Reader::start(const Napi::Env& env)
                                   if (!e->queue.pop(str))
                                       break;
                                   //printf("immediate %s\n", str.c_str());
-                                  e->async->listener.MakeCallback(e->async->listener.Value(), { Napi::Buffer<char>::New(env, &str[0], str.size()) }, e->async->ctx);
+                                  e->async->listener.MakeCallback(e->async->listener.Value(), { BufferEmitter::makeBuffer(env, std::move(str)) }, e->async->ctx);
                               }
                           } else {
                               std::string str;
@@ -520,7 +528,7 @@ void Listen(const Napi::CallbackInfo& info)
         emitter->async = std::make_shared<BufferEmitter::Async>(Napi::Persistent(info[1].As<Napi::Function>()), Napi::AsyncContext(env, "bufferEmitter"));
         if (!emitter->pending.empty()) {
             for (auto& str : emitter->pending) {
-                emitter->async->listener.Call(emitter->async->listener.Value(), { Napi::Buffer<char>::New(env, &str[0], str.size()) });
+                emitter->async->listener.Call(emitter->async->listener.Value(), { BufferEmitter::makeBuffer(env, std::move(str)) });
             }
             emitter->pending.clear();
         }
