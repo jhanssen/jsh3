@@ -138,6 +138,12 @@ public:
         mContainer.push(std::forward<T>(t));
     }
 
+    void push(const T& t)
+    {
+        MutexLocker locker(&mMutex);
+        mContainer.push(t);
+    }
+
     bool pop(T& t)
     {
         MutexLocker locker(&mMutex);

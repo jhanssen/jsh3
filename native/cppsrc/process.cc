@@ -24,8 +24,13 @@ struct AsyncPromise
 
 struct BufferEmitter : public std::enable_shared_from_this<BufferEmitter>
 {
-    Queue<std::string> queue;
-    std::vector<std::string> pending;
+    struct Data
+    {
+        char* data;
+        size_t size;
+    };
+    Queue<Data> queue;
+    std::vector<Data> pending;
 
     struct Async
     {
@@ -38,15 +43,14 @@ struct BufferEmitter : public std::enable_shared_from_this<BufferEmitter>
     };
     std::shared_ptr<Async> async;
 
-    static Napi::Value makeBuffer(const Napi::Env& env, std::string&& str);
+    static Napi::Value makeBuffer(const Napi::Env& env, char* str, size_t size);
 
-    void emit(std::string&& data);
+    void emit(char* data, size_t size);
 };
 
-inline Napi::Value BufferEmitter::makeBuffer(const Napi::Env& env, std::string&& str)
+inline Napi::Value BufferEmitter::makeBuffer(const Napi::Env& env, char* str, size_t size)
 {
-    char* data = strndup(&str[0], str.size());
-    return Napi::Buffer<char>::New(env, data, str.size(), [](const Napi::Env&, char* d) { free(d); });
+    return Napi::Buffer<char>::New(env, str, size, [](const Napi::Env&, char* d) { free(d); });
 }
 
 struct Process
@@ -117,10 +121,10 @@ void Reader::add(const std::shared_ptr<Process>& proc)
     EINTRWRAP(e, ::write(wakeuppipe[1], &c, 1));
 }
 
-void BufferEmitter::emit(std::string&& data)
+void BufferEmitter::emit(char* data, size_t size)
 {
     //printf("emitting %zu\n", data.size());
-    queue.push(std::move(data));
+    queue.push({ data, size });
 
     MutexLocker locker(&reader.mutex);
     reader.pendingemitters.push_back(shared_from_this());
@@ -134,7 +138,7 @@ static void handleRead(int* fd, const std::shared_ptr<BufferEmitter>& emitter)
     for (;;) {
         EINTRWRAP(e, ::read(nfd, buf, sizeof(buf)));
         if (e > 0) {
-            emitter->emit(std::string(buf, e));
+            emitter->emit(strndup(buf, e), e);
         } else if (e == 0) {
             EINTRWRAP(e, ::close(nfd));
             *fd = -1;
@@ -231,20 +235,20 @@ void Reader::start(const Napi::Env& env)
                           if (e->async) {
                               auto env = e->async->listener.Env();
                               Napi::HandleScope scope(env);
-                              std::string str;
+                              BufferEmitter::Data data;
                               for (;;) {
-                                  if (!e->queue.pop(str))
+                                  if (!e->queue.pop(data))
                                       break;
                                   //printf("immediate %s\n", str.c_str());
-                                  e->async->listener.MakeCallback(e->async->listener.Value(), { BufferEmitter::makeBuffer(env, std::move(str)) }, e->async->ctx);
+                                  e->async->listener.MakeCallback(e->async->listener.Value(), { BufferEmitter::makeBuffer(env, data.data, data.size) }, e->async->ctx);
                               }
                           } else {
-                              std::string str;
+                              BufferEmitter::Data data;
                               for (;;) {
-                                  if (!e->queue.pop(str))
+                                  if (!e->queue.pop(data))
                                       break;
                                   //printf("pending %s\n", str.c_str());
-                                  e->pending.push_back(std::move(str));
+                                  e->pending.emplace_back(std::move(data));
                               }
                           }
                       }
@@ -528,7 +532,7 @@ void Listen(const Napi::CallbackInfo& info)
         emitter->async = std::make_shared<BufferEmitter::Async>(Napi::Persistent(info[1].As<Napi::Function>()), Napi::AsyncContext(env, "bufferEmitter"));
         if (!emitter->pending.empty()) {
             for (auto& str : emitter->pending) {
-                emitter->async->listener.Call(emitter->async->listener.Value(), { BufferEmitter::makeBuffer(env, std::move(str)) });
+                emitter->async->listener.Call(emitter->async->listener.Value(), { BufferEmitter::makeBuffer(env, str.data, str.size) });
             }
             emitter->pending.clear();
         }
