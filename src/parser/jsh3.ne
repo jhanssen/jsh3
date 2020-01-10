@@ -90,9 +90,9 @@ cmds -> cmdamp
       | jsCondition
 
 cmdamp -> cmdsemi _ amp ex {% extractCmdAmp %}
-cmdsemi -> cmdpipe (_ %semi _ cmdpipe):* {% extractCmdSemi %}
-cmdpipe -> cmdlogical (_ %pipe _ cmdlogical):* {% extractCmdPipe %}
-cmdlogical -> cmd (_ logical _ cmd):* {% extractCmdLogical %}
+cmdsemi -> cmdlogical (_ %semi _ cmdlogical):* {% extractCmdSemi %}
+cmdlogical -> cmdpipe (_ logical _ cmdpipe):* {% extractCmdLogical %}
+cmdpipe -> cmd (_ %pipe _ cmd):* {% extractCmdPipe %}
 
 logical -> %and | %or
 amp -> null | %amp
