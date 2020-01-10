@@ -71,7 +71,7 @@ function expandVariable(value: any) {
     return env[value.value] || "";
 }
 
-function expandCmd(value: any): Promise<string> {
+function expandCmdStdout(value: any): Promise<string> {
     return new Promise((resolve, reject) => {
         const ps = [];
         for (const id of value.cmd) {
@@ -85,13 +85,29 @@ function expandCmd(value: any): Promise<string> {
     });
 }
 
+function expandCmdStatus(value: any): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const ps = [];
+        for (const id of value.cmd) {
+            ps.push(expand(id));
+        }
+        Promise.all(ps).then(args => {
+            runProcessToCompletion(args).then(out => {
+                resolve(out.status.toString());
+            });
+        }).catch(e => { reject(e); });
+    });
+}
+
 function expand(value: any): Promise<string> {
     return new Promise((resolve, reject) => {
         if (typeof value === "object" && "type" in value) {
             if (value.type === "variable") {
                 resolve(expandVariable(value));
             } else if (value.type === "cmd") {
-                resolve(expandCmd(value));
+                resolve(expandCmdStatus(value));
+            } else if (value.type === "dollarcmd") {
+                resolve(expandCmdStdout(value.cmd[0]));
             } else if (value.value !== undefined) {
                 resolve(value.value.toString());
             } else {
@@ -286,7 +302,8 @@ function processLines(lines: string[] | undefined) {
         const parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
         parser.feed(line);
         if (parser.results) {
-            visit(parser.results);
+            //console.log("whey", JSON.stringify(parser.results, null, 4));
+            visit(parser.results, line);
         }
     }
     Promise.all(promises).then(() => {

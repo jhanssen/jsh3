@@ -116,6 +116,7 @@ subelifCondition -> "elif" __ conditions _ %semi _ "then" __ cmdmulti (__ subeli
 whileCondition -> "while" __ conditions _ %semi _ "do" __ cmdmulti __ "done" redir {% extractWhile %}
 jsCondition -> js
 cmdCondition -> %lparen _ cmd _ %rparen {% extractCmdCondition %}
+dollarCmdCondition -> %dollarlparen _ cmd _ %rparen {% extractDollarCmdCondition %}
 dollarCondition -> %variable
                  | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 logicalCondition -> "true" | "false"
@@ -127,6 +128,7 @@ compare -> %srightgr
          | %neq
 condition -> jsCondition
            | cmdCondition
+           | dollarCmdCondition
            | dollarCondition
            | logicalCondition
            | singlestring
@@ -182,6 +184,7 @@ arg -> %identifier
      | doublestring
      | jsblock
      | %lparen _ cmd _ %rparen {% extract2a %}
+     | %dollarlparen _ cmd _ %rparen {% extractDollarCmd %}
      | %variable
      | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 argnojs -> %identifier
@@ -189,6 +192,7 @@ argnojs -> %identifier
          | singlestring
          | doublestring
          | %lparen _ cmd _ %rparen {% extract2a %}
+         | %dollarlparen _ cmd _ %rparen {% extractDollarCmd %}
          | %variable
          | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
 
@@ -200,6 +204,10 @@ function extract1(d: any) {
 
 function extract2a(d: any) {
     return [d[2]];
+}
+
+function extractDollarCmd(d: any) {
+    return [{ type: "dollarcmd", cmd: d[2] }];
 }
 
 function extractDollarVariable(d: any) {
@@ -301,6 +309,10 @@ function extractConditions(d: any) {
 
 function extractCmdCondition(d: any) {
     return d[2];
+}
+
+function extractDollarCmdCondition(d: any) {
+    return [{ type: "dollarcmd", cmd: d[2] }];
 }
 
 function extractCmdMulti(d: any) {
