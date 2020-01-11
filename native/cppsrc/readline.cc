@@ -662,6 +662,24 @@ Napi::Value Pause(const Napi::CallbackInfo& info)
                              rl_set_prompt("");
                              rl_replace_line("", 0);
                              rl_redisplay();
+                             state.redirector.pause();
+                             state.readlineDeinit();
+                             return Undefined;
+                         });
+}
+
+Napi::Value Quiet(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    return state.runTask(env, env.Undefined(),
+                         [](const Variant& arg) -> Variant {
+                             if (state.paused)
+                                 return Undefined;
+                             state.paused = true;
+                             rl_set_prompt("");
+                             rl_replace_line("", 0);
+                             rl_redisplay();
                              state.redirector.quiet();
                              state.readlineDeinit();
                              return Undefined;
@@ -821,6 +839,7 @@ Napi::Object Setup(Napi::Env env, Napi::Object exports)
     exports.Set("start", Napi::Function::New(env, Start));
     exports.Set("stop", Napi::Function::New(env, Stop));
     exports.Set("pause", Napi::Function::New(env, Pause));
+    exports.Set("quiet", Napi::Function::New(env, Quiet));
     exports.Set("resume", Napi::Function::New(env, Resume));
     exports.Set("clear", Napi::Function::New(env, Clear));
     exports.Set("setPrompt", Napi::Function::New(env, SetPrompt));

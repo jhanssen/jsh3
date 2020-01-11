@@ -93,7 +93,7 @@ function expandCmdStatus(value: any): Promise<string> {
         }
         Promise.all(ps).then(args => {
             runProcessToCompletion(args).then(out => {
-                resolve(out.status.toString());
+                resolve((out.status || -1).toString());
             });
         }).catch(e => { reject(e); });
     });
@@ -104,10 +104,9 @@ function expand(value: any): Promise<string> {
         if (typeof value === "object" && "type" in value) {
             if (value.type === "variable") {
                 resolve(expandVariable(value));
-            } else if (value.type === "cmd") {
-                resolve(expandCmdStatus(value));
-            } else if (value.type === "dollarcmd") {
-                resolve(expandCmdStdout(value.cmd[0]));
+            } else if (value.type === "subshell" || value.type === "subshellOut") {
+                //resolve(subshell(value));
+                resolve(value);
             } else if (value.value !== undefined) {
                 resolve(value.value.toString());
             } else {
@@ -302,7 +301,7 @@ function processLines(lines: string[] | undefined) {
         const parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
         parser.feed(line);
         if (parser.results) {
-            //console.log("whey", JSON.stringify(parser.results, null, 4));
+            console.log("whey", JSON.stringify(parser.results, null, 4));
             visit(parser.results, line);
         }
     }

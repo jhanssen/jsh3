@@ -27,6 +27,7 @@ declare namespace Native
     export function start(callback: typeof nativeCallback): void;
     export function stop(): void;
     export function pause(): Promise<void>;
+    export function quiet(): Promise<void>;
     export function resume(): Promise<void>;
     export function clear(): Promise<void>;
     export function setPrompt(prompt: string): Promise<void>;

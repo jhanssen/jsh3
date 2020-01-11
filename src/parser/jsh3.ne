@@ -90,9 +90,9 @@ cmds -> cmdsep
       | jsCondition
       | subshell
 
-cmdsep -> cmdlogical (_ (%semi | (%amp %ex:?)) _ cmdlogical):* {% extractCmdSep %}
-cmdlogical -> cmdpipe (_ logical _ cmdpipe):* {% extractCmdLogical %}
-cmdpipe -> cmd (_ %pipe _ cmd):* {% extractCmdPipe %}
+cmdsep -> cmdlogical (_ (%semi | (%amp %ex:?)) _ (cmdlogical | subshell | subshellout)):* {% extractCmdSep %}
+cmdlogical -> cmdpipe (_ logical _ (cmdpipe | subshell | subshellout)):* {% extractCmdLogical %}
+cmdpipe -> cmd (_ %pipe _ (cmd | subshell | subshellout)):* {% extractCmdPipe %}
 
 logical -> %and | %or
 amp -> null | %amp
@@ -204,10 +204,6 @@ function extract1(d: any) {
     return d[1];
 }
 
-function extract2a(d: any) {
-    return [d[2]];
-}
-
 function extractDollarVariable(d: any) {
     return d[1];
 }
@@ -228,13 +224,11 @@ function extractJSCode(d: any) {
             }
         }
     }
-    return [
-        { type: "jscode",
-          start: d[0][0].offset,
-          end: d[0][4].offset,
-          args: args.length > 0 ? args : undefined
-        }
-    ];
+    return { type: "jscode",
+             start: d[0][0].offset,
+             end: d[0][4].offset,
+             args: args.length > 0 ? args : undefined
+           };
 }
 
 function extractElIf(d: any) {
@@ -256,7 +250,6 @@ function extractElIf(d: any) {
 }
 
 function extractIf(d: any) {
-    const o = [];
     const ifentries = [];
     ifentries.push({ type: "condition", condition: d[2] }); // condition
     ifentries.push(d[8]); // body
@@ -269,17 +262,14 @@ function extractIf(d: any) {
         elseentries = d[10][0][3];
     }
 
-    o.push({ type: "if", if: ifentries, elif: elifentries, else: elseentries, redirs: d[11] });
-    return o;
+    return { type: "if", if: ifentries, elif: elifentries, else: elseentries, redirs: d[11] };
 }
 
 function extractWhile(d: any) {
-    const o = [];
     const entries = [];
     entries.push({ type: "condition", condition: d[2] }); // condition
     entries.push(d[8]); // body
-    o.push({ type: "while", while: entries, redirs: d[11] });
-    return o;
+    return { type: "while", while: entries, redirs: d[11] };
 }
 
 function extractConditions(d: any) {
@@ -306,11 +296,11 @@ function extractConditions(d: any) {
 }
 
 function extractSubshell(d: any){
-    return [{ type: "subshell", subshell: d[2] }];
+    return { type: "subshell", subshell: d[2][0] };
 }
 
 function extractSubshellOut(d: any) {
-    return [{ type: "subshellOut", subshellOut: d[2] }];
+    return { type: "subshellOut", subshell: d[2][0] };
 }
 
 function extractCmdMulti(d: any) {
@@ -345,8 +335,7 @@ function extractCmd(d: any) {
             entries.push(d[2][i][1][0]);
         }
     }
-    const o = [{ type: "cmd", assignments: a, cmd: entries, redirs: d[3] }];
-    return o;
+    return { type: "cmd", assignments: a, cmd: entries, redirs: d[3] };
 }
 
 function extractRedir(d: any) {
@@ -400,7 +389,7 @@ function extractCmdSep(d: any) {
                     merge(entries, "cmd", { ex: true });
                 }
             }
-            entries.push(d[1][i][3]);
+            entries.push(d[1][i][3][0]);
         }
     }
     return { type: "sep", sep: entries };
@@ -411,7 +400,7 @@ function extractCmdLogical(d: any) {
     if (d[1] instanceof Array) {
         for (let i = 0; i < d[1].length; ++i) {
             entries.push(d[1][i][1][0]);
-            entries.push(d[1][i][3]);
+            entries.push(d[1][i][3][0]);
         }
     }
     return { type: "logical", logical: entries };
@@ -421,20 +410,10 @@ function extractCmdPipe(d: any) {
     const entries = [d[0]];
     if (d[1] instanceof Array) {
         for (let i = 0; i < d[1].length; ++i) {
-            entries.push(d[1][i][3]);
+            entries.push(d[1][i][3][0]);
         }
     }
     return { type: "pipe", pipe: entries };
-}
-
-function extractCmdAmp(d: any) {
-    const entry = [d[0]];
-    const opts: { amp?: boolean, ex?: boolean } = {};
-    if (d[2] instanceof Array && d[2].length === 1)
-        opts.amp = true;
-    if (d[3] instanceof Array && d[3].length === 1)
-        opts.ex = true;
-    return { type: "cmdamp", cmdamp: entry, opts: opts };
 }
 
 function extract024(d: any) {

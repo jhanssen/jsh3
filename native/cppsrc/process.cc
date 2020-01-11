@@ -22,6 +22,13 @@ struct AsyncPromise
     Napi::AsyncContext ctx;
 };
 
+struct ProcessOptions
+{
+    bool redirectStdin;
+    bool redirectStdout;
+    bool redirectStderr;
+};
+
 struct BufferEmitter : public std::enable_shared_from_this<BufferEmitter>
 {
     struct Data
@@ -541,7 +548,7 @@ void Listen(const Napi::CallbackInfo& info)
     }
 }
 
-static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>& proc)
+static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>& proc, const ProcessOptions& opts)
 {
     // we'll need to notify the parent if we can't exec,
     // create a pipe with CLOEXEC and write to it if
@@ -554,25 +561,26 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
     ::pipe(runpipe);
     fcntl(runpipe[1], F_SETFD, fcntl(runpipe[1], F_GETFD) | FD_CLOEXEC);
 
-    int stdinpipe[2];
-    ::pipe(stdinpipe);
+    int stdinpipe[2] = { -1, -1 };
+    if (opts.redirectStdin) {
+        ::pipe(stdinpipe);
+    }
 
-    int stdoutpipe[2];
-    ::pipe(stdoutpipe);
+    int stdoutpipe[2] = { -1, -1 };
+    if (opts.redirectStdout) {
+        ::pipe(stdoutpipe);
+    }
 
-    int stderrpipe[2];
-    ::pipe(stderrpipe);
+    int stderrpipe[2] = { -1, -1 };
+    if (opts.redirectStderr) {
+        ::pipe(stderrpipe);
+    }
 
     int e;
 
     const pid_t pid = fork();
     if (pid == 0) {
         // child
-
-        EINTRWRAP(e, ::close(runpipe[0]));
-        EINTRWRAP(e, ::close(stdinpipe[1]));
-        EINTRWRAP(e, ::close(stdoutpipe[0]));
-        EINTRWRAP(e, ::close(stderrpipe[0]));
 
         signal(SIGINT, SIG_DFL);
         signal(SIGQUIT, SIG_DFL);
@@ -581,12 +589,23 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
         signal(SIGTTOU, SIG_DFL);
         signal(SIGCHLD, SIG_DFL);
 
-        EINTRWRAP(e, dup2(stdinpipe[0], STDIN_FILENO));
-        EINTRWRAP(e, ::close(stdinpipe[0]));
-        EINTRWRAP(e, dup2(stdoutpipe[1], STDOUT_FILENO));
-        EINTRWRAP(e, ::close(stdoutpipe[1]));
-        EINTRWRAP(e, dup2(stderrpipe[1], STDERR_FILENO));
-        EINTRWRAP(e, ::close(stderrpipe[1]));
+        EINTRWRAP(e, ::close(runpipe[0]));
+
+        if (opts.redirectStdin) {
+            EINTRWRAP(e, ::close(stdinpipe[1]));
+            EINTRWRAP(e, dup2(stdinpipe[0], STDIN_FILENO));
+            EINTRWRAP(e, ::close(stdinpipe[0]));
+        }
+        if (opts.redirectStdout) {
+            EINTRWRAP(e, ::close(stdoutpipe[0]));
+            EINTRWRAP(e, dup2(stdoutpipe[1], STDOUT_FILENO));
+            EINTRWRAP(e, ::close(stdoutpipe[1]));
+        }
+        if (opts.redirectStderr) {
+            EINTRWRAP(e, ::close(stderrpipe[0]));
+            EINTRWRAP(e, dup2(stderrpipe[1], STDERR_FILENO));
+            EINTRWRAP(e, ::close(stderrpipe[1]));
+        }
 
         const char** argv = reinterpret_cast<const char**>(malloc((proc->args.size() + 2) * sizeof(char*)));
         argv[0] = strdup(proc->cmd.c_str());
@@ -614,9 +633,15 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
     } else if (pid > 0) {
         // parent
 
-        EINTRWRAP(e, ::close(stdinpipe[0]));
-        EINTRWRAP(e, ::close(stdoutpipe[1]));
-        EINTRWRAP(e, ::close(stderrpipe[1]));
+        if (opts.redirectStdin) {
+            EINTRWRAP(e, ::close(stdinpipe[0]));
+        }
+        if (opts.redirectStdout) {
+            EINTRWRAP(e, ::close(stdoutpipe[1]));
+        }
+        if (opts.redirectStderr) {
+            EINTRWRAP(e, ::close(stderrpipe[1]));
+        }
 
         bool ok = true;
         EINTRWRAP(e, ::close(runpipe[1]));
@@ -642,9 +667,15 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
         }
 
         if (!ok) {
-            EINTRWRAP(e, ::close(stdinpipe[1]));
-            EINTRWRAP(e, ::close(stdoutpipe[0]));
-            EINTRWRAP(e, ::close(stderrpipe[0]));
+            if (opts.redirectStdin) {
+                EINTRWRAP(e, ::close(stdinpipe[1]));
+            }
+            if (opts.redirectStdout) {
+                EINTRWRAP(e, ::close(stdoutpipe[0]));
+            }
+            if (opts.redirectStderr) {
+                EINTRWRAP(e, ::close(stderrpipe[0]));
+            }
 
             proc->promise->promise.Reject(Napi::String::New(env, "Failed to launch process"));
             proc.reset();
@@ -654,27 +685,38 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             proc->stdout = stdoutpipe[0];
             proc->stderr = stderrpipe[0];
 
-            e = fcntl(stdinpipe[1], F_GETFL);
-            if (e != -1) {
-                fcntl(stdinpipe[1], F_SETFL, e | O_NONBLOCK);
+            if (opts.redirectStdin) {
+                e = fcntl(stdinpipe[1], F_GETFL);
+                if (e != -1) {
+                    fcntl(stdinpipe[1], F_SETFL, e | O_NONBLOCK);
+                }
             }
-            e = fcntl(stdoutpipe[0], F_GETFL);
-            if (e != -1) {
-                fcntl(stdoutpipe[0], F_SETFL, e | O_NONBLOCK);
+            if (opts.redirectStdout) {
+                e = fcntl(stdoutpipe[0], F_GETFL);
+                if (e != -1) {
+                    fcntl(stdoutpipe[0], F_SETFL, e | O_NONBLOCK);
+                }
             }
-            e = fcntl(stderrpipe[0], F_GETFL);
-            if (e != -1) {
-                fcntl(stderrpipe[0], F_SETFL, e | O_NONBLOCK);
+            if (opts.redirectStderr) {
+                e = fcntl(stderrpipe[0], F_GETFL);
+                if (e != -1) {
+                    fcntl(stderrpipe[0], F_SETFL, e | O_NONBLOCK);
+                }
             }
 
             proc->pid = pid;
             proc->running = true;
 
-            proc->emitStderr = std::make_shared<BufferEmitter>();
-            proc->emitStdout = std::make_shared<BufferEmitter>();
-
-            proc->writer = std::make_shared<Process::Writer>();
-            proc->writer->process = proc;
+            if (opts.redirectStderr) {
+                proc->emitStderr = std::make_shared<BufferEmitter>();
+            }
+            if (opts.redirectStdout) {
+                proc->emitStdout = std::make_shared<BufferEmitter>();
+            }
+            if (opts.redirectStdin) {
+                proc->writer = std::make_shared<Process::Writer>();
+                proc->writer->process = proc;
+            }
 
             reader.add(proc);
         }
@@ -684,9 +726,15 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
 
     auto obj = Napi::Object::New(env);
     if (proc) {
-        obj.Set("stderrCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStderr));
-        obj.Set("stdoutCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStdout));
-        obj.Set("stdinCtx", Wrap<std::shared_ptr<Process::Writer> >::wrap(env, proc->writer));
+        if (opts.redirectStderr) {
+            obj.Set("stderrCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStderr));
+        }
+        if (opts.redirectStdout) {
+            obj.Set("stdoutCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStdout));
+        }
+        if (opts.redirectStdin) {
+            obj.Set("stdinCtx", Wrap<std::shared_ptr<Process::Writer> >::wrap(env, proc->writer));
+        }
     }
     obj.Set("listen", Napi::Function::New(env, Listen));
     obj.Set("write", Napi::Function::New(env, Write));
@@ -736,8 +784,17 @@ Napi::Value Launch(const Napi::CallbackInfo& info)
         }
         proc->env = std::move(env);
     }
+    ProcessOptions opts = {
+        true, true, true
+    };
+    if (info[3].IsObject()) {
+        const auto obj = info[3].As<Napi::Object>();
+        opts.redirectStdin = obj.Get("redirectStdin").As<Napi::Boolean>().Value();
+        opts.redirectStdout = obj.Get("redirectStdout").As<Napi::Boolean>().Value();
+        opts.redirectStderr = obj.Get("redirectStderr").As<Napi::Boolean>().Value();
+    }
 
-    return launchProcess(env, proc);
+    return launchProcess(env, proc, opts);
 }
 
 Napi::Value Uid(const Napi::CallbackInfo& info)

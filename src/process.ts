@@ -3,6 +3,7 @@ import {
     Launch as NativeProcessLaunch,
     InCtx as NativeProcessIn,
     OutCtx as NativeProcessOut
+    Options as NativeProcessOptions
 } from "../native/process";
 
 import { Readable, Writable } from "stream";
@@ -79,8 +80,8 @@ export class Process
 {
     private _launch: NativeProcessLaunch;
 
-    constructor(cmd: string, args?: string[], env?: {[key: string]: string}) {
-        this._launch = NativeProcess.launch(cmd, args, env);
+    constructor(cmd: string, args?: string[], env?: {[key: string]: string}, opts?: NativeProcessOptions) {
+        this._launch = NativeProcess.launch(cmd, args, env, opts);
     }
 
     get status() {
@@ -119,7 +120,7 @@ export class Process
 }
 
 export interface ReadProcess {
-    status: number;
+    status: number | undefined;
     stdout: Buffer | undefined;
     stderr: Buffer | undefined;
 }

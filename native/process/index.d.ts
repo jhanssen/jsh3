@@ -12,13 +12,20 @@ export interface Launch
     stdinCtx?: InCtx;
 }
 
+export interface Options
+{
+    redirectStdin: boolean;
+    redirectStdout: boolean;
+    redirectStderr: boolean;
+}
+
 declare namespace Native
 {
     export function start(): void;
     export function stop(): void;
     export function uid(name?: string): number;
     export function gids(name?: string): number[];
-    export function launch(cmd: string, args?: string[], env?: {[key: string]: string}): Launch;
+    export function launch(cmd: string, args?: string[], env?: {[key: string]: string}, opts?: Options): Launch;
 }
 
 export default Native;
