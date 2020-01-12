@@ -88,11 +88,10 @@ cmds -> cmdsep
       | ifCondition
       | whileCondition
       | jsCondition
-      | subshell
 
-cmdsep -> cmdlogical (_ (%semi | (%amp %ex:?)) _ (cmdlogical | subshell | subshellout)):* {% extractCmdSep %}
-cmdlogical -> cmdpipe (_ logical _ (cmdpipe | subshell | subshellout)):* {% extractCmdLogical %}
-cmdpipe -> cmd (_ %pipe _ (cmd | subshell | subshellout)):* {% extractCmdPipe %}
+cmdsep -> cmdlogical (_ (%semi | (%amp %ex:?)) _ cmdlogical:?):* {% extractCmdSep %}
+cmdlogical -> cmdpipe (_ logical _ cmdpipe):* {% extractCmdLogical %}
+cmdpipe -> (cmd | subshell | subshellout) (_ %pipe _ (cmd | subshell | subshellout)):* {% extractCmdPipe %}
 
 logical -> %and | %or
 amp -> null | %amp
@@ -135,7 +134,7 @@ condition -> jsCondition
            | %integer
 conditions -> subconditions {% extractConditions %}
 subconditions -> condition (_ compare _ condition):? (__ logical __ subconditions):?
-subshell -> %lparen _ cmds _ %rparen {% extractSubshell %}
+subshell -> %lparen _ cmds _ %rparen redir {% extractSubshell %}
 subshellout -> %dollarlparen _ cmds _ %rparen {% extractSubshellOut %}
 js -> jsblock (%lparen argnojs (_ %comma _ argnojs):* %rparen):? {% extractJSCode %}
 
@@ -296,7 +295,7 @@ function extractConditions(d: any) {
 }
 
 function extractSubshell(d: any){
-    return { type: "subshell", subshell: d[2][0] };
+    return { type: "subshell", subshell: d[2][0], redirs: d[5] };
 }
 
 function extractSubshellOut(d: any) {
@@ -323,9 +322,19 @@ function extractCmd(d: any) {
         a = [];
         for (let i = 0; i < d[0].length; ++i) {
             const v = d[0][i][0][2];
+            let val;
+            if (v.length === 1) {
+                if (v[0].length === 1) {
+                    val = v[0][0];
+                } else {
+                    val = v[0];
+                }
+            } else {
+                val = v;
+            }
             a.push({ type: "assignment",
                      key: d[0][i][0][0][0],
-                     value: v.length === 1 ? v[0][0] : v });
+                     value: val });
         }
     }
     const entries = [];
@@ -389,7 +398,9 @@ function extractCmdSep(d: any) {
                     merge(entries, "cmd", { ex: true });
                 }
             }
-            entries.push(d[1][i][3][0]);
+            if (d[1][i][3] !== null) {
+                entries.push(d[1][i][3]);
+            }
         }
     }
     return { type: "sep", sep: entries };
@@ -400,7 +411,7 @@ function extractCmdLogical(d: any) {
     if (d[1] instanceof Array) {
         for (let i = 0; i < d[1].length; ++i) {
             entries.push(d[1][i][1][0]);
-            entries.push(d[1][i][3][0]);
+            entries.push(d[1][i][3]);
         }
     }
     return { type: "logical", logical: entries };
@@ -410,10 +421,10 @@ function extractCmdPipe(d: any) {
     const entries = [d[0]];
     if (d[1] instanceof Array) {
         for (let i = 0; i < d[1].length; ++i) {
-            entries.push(d[1][i][3][0]);
+            entries.push(d[1][i][3]);
         }
     }
-    return { type: "pipe", pipe: entries };
+    return { type: "pipe", pipe: entries.map(e => e[0]) };
 }
 
 function extract024(d: any) {
