@@ -142,7 +142,8 @@ class Pipe
                 }
 
                 const ctx = {
-                    args: args || []
+                    args: args || [],
+                    console: console
                 };
                 const ret = runInNewContext(jscode, ctx);
                 if (typeof ret === "number") {
