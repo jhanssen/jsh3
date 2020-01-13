@@ -1,37 +1,106 @@
 import { ReadProcess, Process } from "./process";
+import { Readable, Writable } from "stream";
+import { Streamable } from "./streamable";
+import { pathify } from "./utils";
+import { expand } from "./expand";
+import { env } from "./variable";
+import { commands as internalCommands } from "./commands";
+
+interface Options
+{
+    readable: SubshellReader;
+    writable: SubshellWriter;
+}
+
+async function runCmd(cmds: any, opts?: Options) {
+    if (cmds.assignments !== undefined) {
+        console.log("will run assignments");
+    }
+
+    const ps = [];
+    for (const id of cmds.cmd) {
+        ps.push(expand(id));
+    }
+
+    const args = await Promise.all(ps);
+    const cmd: string = args.shift();
+    if (!cmd)
+        return;
+
+    if (cmd in internalCommands) {
+        const internalCmd = internalCommands[cmd as keyof typeof internalCommands];
+        return await internalCmd(args, env);
+    }
+
+    const rcmd = await pathify(cmd);
+
+    const procOpts = {
+        redirectStdin: (opts && opts.writable) ? true : false,
+        redirectStdout: (opts && opts.readable) ? true : false,
+        redirectStderr: false
+    };
+    const proc = new Process(rcmd, args, env, procOpts);
+
+    const readProcess = async () => {
+        if (!opts || !opts.writable)
+            return;
+        for await (const buf of proc.stdout) {
+            opts.readable._write(buf);
+        }
+        opts.readable._write(null);
+    };
+
+    const writeProcess = async () => {
+        if (!opts || !opts.readable)
+            return;
+        for await (const buf of opts.writable) {
+            proc.stdin.write(buf);
+        }
+        proc.stdin.end();
+    };
+
+    const all = await Promise.all([readProcess(), writeProcess(), proc.status]);
+    return all[2];
+}
 
 class Pipe
 {
     private _pipes: any;
-    private _subst: boolean;
+    private _opts: Options | undefined;
 
-    constructor(pipes: any, subst: boolean) {
-        this._pipes = pipes.pipe;
-        this._subst = subst;
+    constructor(pipes: any, opts?: Options) {
+        this._pipes = pipes;
+        this._opts = opts;
     }
 
     [Symbol.asyncIterator]() {
         return {
             _idx: 0,
-            _subst: this._subst,
+            _opts: this._opts,
             _pipes: this._pipes,
-            next(): Promise<IteratorResult<ReadProcess | undefined>> {
+            next(): Promise<IteratorResult<number | undefined>> {
                 if (this._idx >= this._pipes.length) {
                     return Promise.resolve({ done: true, value: undefined });
                 } else {
                     return new Promise((resolve, reject) => {
                         // if this is the last entry in the pipe list then we should write directly to stdout
                         // unless we're in a $() expansion, in which case we'll do substitution
-                        const redirStdout = this._subst || this._idx < this._pipes.length - 1;
+                        const redirStdout = this._opts !== undefined || this._idx < this._pipes.length - 1;
                         const redirStdin = this._idx > 0;
 
-                        const opts = {
-                            redirectStdin: redirStdin,
-                            redirectStdout: redirStdout,
-                            redirectStderr: false
-                        };
-
-                        Need to have a common expander (expand.ts?)
+                        const will = this._pipes[this._idx++];
+                        // console.log("will run", will);
+                        switch (will.type) {
+                        case "subshell":
+                            subshell(will, this._opts).then(val => { resolve({ done: false, value: val }); });
+                            break;
+                        case "cmd":
+                            runCmd(will, this._opts).then(val => { resolve({ done: false, value: val }); });
+                            break;
+                        default:
+                            reject(`Invalid cmd type ${will.type}`);
+                            break;
+                        }
                     });
                 }
             }
@@ -42,19 +111,20 @@ class Pipe
 class LogicalOperations
 {
     private _logicals: any;
-    private _subst: boolean;
+    private _opts: Options | undefined;
 
-    constructor(logicals: any, subst: boolean) {
-        this._logicals = logicals.logical;
+    constructor(logicals: any, opts?: Options) {
+        this._logicals = logicals;
+        this._opts = opts;
     }
 
     [Symbol.asyncIterator]() {
         return {
             _idx: 0,
             _done: false,
-            _subst: this._subst,
+            _opts: this._opts,
             _logicals: this._logicals,
-            next(): Promise<IteratorResult<ReadProcess | undefined>> {
+            next(): Promise<IteratorResult<number | undefined>> {
                 if (this._done || this._idx >= this._logicals.length) {
                     return Promise.resolve({ done: true, value: undefined });
                 } else {
@@ -63,28 +133,28 @@ class LogicalOperations
                         const operand = this._logicals[this._idx];
                         this._idx += 2;
                         if (operand.type === "pipe") {
-                            pipe(operand, this._subst)
+                            pipe(operand, this._opts)
                                 .then(val => {
-                                    if (!val) {
+                                    if (val === undefined) {
                                         resolve({ done: false, value: undefined });
                                         return;
                                     }
-                                    if (val.status && operator === "&&")
+                                    if (val && operator === "&&")
                                         this._done = true;
-                                    else if (!val.status && operator === "||")
+                                    else if (!val && operator === "||")
                                         this._done = true;
                                     resolve({ done: false, value: val });
                                 }).catch(reject);
                         } else if (operand.type === "subshell" || operand.type === "subshellOut") {
-                            subshell(operand, this._subst)
+                            subshell(operand, this._opts)
                                 .then(val => {
-                                    if (!val) {
+                                    if (val === undefined) {
                                         resolve({ done: false, value: undefined });
                                         return;
                                     }
-                                    if (val.status && operator === "&&")
+                                    if (val && operator === "&&")
                                         this._done = true;
-                                    else if (!val.status && operator === "||")
+                                    else if (!val && operator === "||")
                                         this._done = true;
                                     resolve({ done: false, value: val });
                                 }).catch(reject);
@@ -96,33 +166,35 @@ class LogicalOperations
     }
 }
 
+type UpdateStreamableFunction = (streamable: Streamable) => void;
+
 class CommandSeparators
 {
     private _seps: any;
-    private _subst: boolean;
+    private _opts: Options | undefined;
 
-    constructor(seps: any, subst: boolean) {
-        this._seps = seps.sep;
-        this._subst = subst;
+    constructor(seps: any, opts?: Options) {
+        this._seps = seps;
+        this._opts = opts;
     }
 
     [Symbol.asyncIterator]() {
         return {
             _idx: 0,
             _seps: this._seps,
-            _subst: this._subst,
-            next(): Promise<IteratorResult<ReadProcess | undefined>> {
+            _opts: this._opts,
+            next(): Promise<IteratorResult<number | undefined>> {
                 if (this._idx >= this._seps.length) {
                     return Promise.resolve({ done: true, value: undefined });
                 } else {
                     return new Promise((resolve, reject) => {
                         const item = this._seps[this._idx++];
                         if (item.type === "logical") {
-                            logical(item, this._subst)
+                            logical(item, this._opts)
                                 .then(val => { resolve({ done: false, value: val }); })
                                 .catch(reject);
                         } else if (item.type === "subshell" || item.type === "subshellOut") {
-                            subshell(item, this._subst)
+                            subshell(item, this._opts)
                                 .then(val => { resolve({ done: false, value: val }); })
                                 .catch(reject);
                         } else {
@@ -135,48 +207,220 @@ class CommandSeparators
     }
 }
 
-async function pipe(cmds: any, subst: boolean): Promise<ReadProcess> {
-    const pipes = new Pipe(cmds.pipe, subst);
-    const rp: ReadProcess = { status: undefined, stdout: undefined, stderr: undefined };
-    return rp;
-}
-
-async function logical(cmds: any, subst: boolean): Promise<ReadProcess> {
-    const logicals = new LogicalOperations(cmds.logical, subst);
-    const rp: ReadProcess = { status: undefined, stdout: undefined, stderr: undefined };
-    for await (const nrp of logicals) {
-        if (!nrp)
+async function pipe(cmds: any, opts?: Options): Promise<number | undefined> {
+    if (cmds.type !== "pipe") {
+        throw new Error(`Invalid logical type ${cmds.type}`);
+    }
+    const pipes = new Pipe(cmds.pipe, opts);
+    let rp: number | undefined;
+    for await (const p of pipes) {
+        if (p === undefined)
             continue;
-        rp.status = nrp.status;
-        if (nrp.stdout !== undefined) {
-            if (rp.stdout === undefined)
-                rp.stdout = nrp.stdout;
-            else
-                rp.stdout = Buffer.concat([rp.stdout, nrp.stdout]);
-        }
-        if (nrp.stderr !== undefined) {
-            if (rp.stderr === undefined)
-                rp.stderr = nrp.stderr;
-            else
-                rp.stderr = Buffer.concat([rp.stderr, nrp.stderr]);
-        }
+        rp = p;
     }
     return rp;
 }
 
-export async function subshell(cmds: any, subst?: boolean): Promise<ReadProcess> {
-    let seps: CommandSeparators | undefined;
-    if (cmds.type === "subshell") {
-        seps = new CommandSeparators(cmds.subshell, false || (subst === undefined ? false : subst));
-    } else if (cmds.type === "subshellOut") {
-        seps = new CommandSeparators(cmds.subshell, true);
+async function logical(cmds: any, opts?: Options): Promise<number | undefined> {
+    if (cmds.type !== "logical") {
+        throw new Error(`Invalid logical type ${cmds.type}`);
     }
+    const logicals = new LogicalOperations(cmds.logical, opts);
+    let rp: number | undefined = undefined;
+    for await (const nrp of logicals) {
+        if (nrp === undefined)
+            continue;
+        rp = nrp;
+    }
+    return rp;
+}
+
+async function subshell(cmds: any, opts?: Options): Promise<number | undefined> {
+    let subopts: Options | undefined;
+    if (cmds.type === "subshell") {
+        subopts = opts;
+    } else if (cmds.type === "subshellOut") {
+        subopts = {
+            readable: new SubshellReader(),
+            writable: new SubshellWriter()
+        }
+    } else {
+        throw new Error(`Invalid subshell type: ${cmds.type}`);
+    }
+    if (cmds.subshell.type !== "sep") {
+        throw new Error(`No sep inside of subshell`);
+    }
+    const seps = new CommandSeparators(cmds.subshell.sep, subopts);
+    let rp: number | undefined = undefined;
+    for await (const s of seps) {
+        if (s === undefined)
+            continue;
+        rp = s;
+    }
+    return rp;
+}
+
+export interface SubshellResult {
+    status: number | undefined;
+    stdout: Buffer | undefined;
+}
+
+export async function runSubshell(cmds: any): Promise<SubshellResult> {
+    let opts: Options | undefined;
+    let seps: CommandSeparators | undefined;
+    switch (cmds.type) {
+    case "subshellOut":
+        opts = {
+            readable: new SubshellReader(),
+            writable: new SubshellWriter()
+        }
+        // fall through
+    case "subshell":
+        seps = new CommandSeparators(cmds.subshell.sep, opts);
+        break;
+    }
+
     if (seps === undefined) {
         throw new Error(`Invalid subshell type: ${cmds.type}`);
     }
-    const rp: ReadProcess = { status: undefined, stdout: undefined, stderr: undefined };
-    for await (const result of seps) {
-        console.log(result);
+
+    const result: SubshellResult = {
+        status: undefined,
+        stdout: undefined
+    };
+
+    if (opts) {
+        const o = opts;
+        o.writable.end();
+        o.readable.on("data", chunk => {
+            if (result.stdout === undefined) {
+                result.stdout = chunk;
+            } else {
+                result.stdout = Buffer.concat([result.stdout, chunk]);
+            }
+        });
+        o.readable.on("end", () => {
+            o.readable.removeAllListeners();
+        });
+    }
+
+    for await (const s of seps) {
+        if (s === undefined)
+            continue;
+        result.status = s;
+    }
+    return result;
+}
+
+export async function runSeparators(cmds: any): Promise<number | undefined> {
+    if (cmds.type !== "sep") {
+        throw new Error(`Invalid sep type ${cmds.type}`);
+    }
+    const seps = new CommandSeparators(cmds.sep);
+    let rp: number | undefined = undefined;
+    for await (const s of seps) {
+        if (s === undefined)
+            continue;
+        rp = s;
     }
     return rp;
+}
+
+type BufferOrNull = Buffer | null;
+
+class SubshellReader extends Readable
+{
+    private _paused: boolean;
+    private _buffers: BufferOrNull[];
+
+    constructor() {
+        super();
+
+        this._paused = true;
+        this._buffers = [];
+    }
+
+    _read(size: number) {
+        for (let i = 0; i < this._buffers.length; ++i) {
+            if (!this.push(this._buffers[i])) {
+                // we got so far
+                this._buffers.splice(0, i + 1);
+                return;
+            }
+        }
+        this._buffers = [];
+        this._paused = false;
+    }
+
+    _write(buf: Buffer | null) {
+        if (this._paused) {
+            this._buffers.push(buf);
+        } else {
+            if (!this.push(buf)) {
+                this._paused = true;
+            }
+        }
+    }
+}
+
+type WriteFinalFunction = () => void;
+type WriteCallbackFunction = (err: any) => void;
+type WriteResolveFunction = (value?: IteratorResult<Buffer | undefined> | PromiseLike<IteratorResult<Buffer | undefined>>) => void;
+
+class SubshellWriter extends Writable
+{
+    private _buffers: { buf: Buffer, callback: WriteCallbackFunction }[];
+    private _finalcb: WriteFinalFunction | undefined;
+    private _resolver: WriteResolveFunction | undefined;
+
+    constructor() {
+        super();
+
+        this._buffers = [];
+    }
+
+    _write(buf: Buffer, encoding: string, callback: (err: any) => void) {
+        if (this._resolver) {
+            callback(null);
+            this._resolver({ done: false, value: buf });
+            this._resolver = undefined;
+        } else {
+            this._buffers.push({ buf: buf, callback: callback });
+        }
+    }
+
+    _final(callback: () => void) {
+        if (this._resolver) {
+            callback();
+            this._resolver({ done: true, value: undefined });
+            this._resolver = undefined;
+        } else {
+            this._finalcb = callback;
+        }
+    }
+
+    [Symbol.asyncIterator]() {
+        return {
+            that: this,
+            next(): Promise<IteratorResult<Buffer | undefined>> {
+                return new Promise((resolve, reject) => {
+                    const that = this.that;
+                    if (that._buffers.length > 0) {
+                        const buf = that._buffers.shift();
+                        if (buf === undefined) {
+                            throw new Error("shifted undefined in SubshellWriter");
+                        }
+                        buf.callback(null);
+                        resolve({ done: false, value: buf.buf });
+                    } else if (that._finalcb) {
+                        that._finalcb();
+                        that._finalcb = undefined;
+                        resolve({ done: true, value: undefined });
+                    } else {
+                        that._resolver = resolve;
+                    }
+                });
+            }
+        }
+    }
 }

@@ -2,11 +2,12 @@ import {
     default as NativeProcess,
     Launch as NativeProcessLaunch,
     InCtx as NativeProcessIn,
-    OutCtx as NativeProcessOut
+    OutCtx as NativeProcessOut,
     Options as NativeProcessOptions
 } from "../native/process";
 
 import { Readable, Writable } from "stream";
+import { Streamable } from "./streamable";
 
 class ProcessWriter extends Writable
 {
@@ -76,11 +77,11 @@ class ProcessReader extends Readable
     }
 }
 
-export class Process
+export class Process implements Streamable
 {
     private _launch: NativeProcessLaunch;
 
-    constructor(cmd: string, args?: string[], env?: {[key: string]: string}, opts?: NativeProcessOptions) {
+    constructor(cmd: string, args?: string[], env?: {[key: string]: string | undefined}, opts?: NativeProcessOptions) {
         this._launch = NativeProcess.launch(cmd, args, env, opts);
     }
 

@@ -2,6 +2,7 @@ import * as nearley from "nearley"
 import { jsh3_grammar } from "./parser"
 import { default as Readline, Data as ReadlineData, Completion as ReadlineCompletion } from "../native/readline";
 import { readProcess, ReadProcess } from "./process";
+import { runSeparators } from "./subshell";
 import { default as Process } from "../native/process";
 import { join as pathJoin } from "path";
 import { stat } from "fs";
@@ -260,6 +261,12 @@ function visitJS(node: any, line: string) {
     }
 }
 
+function visitSep(node: any) {
+    runSeparators(node).then(arg => {
+        console.log("done sep", arg);
+    });
+}
+
 function visit(node: any, line: string) {
     if (node instanceof Array) {
         for (const item of node) {
@@ -269,6 +276,9 @@ function visit(node: any, line: string) {
     }
 
     switch (node.type) {
+    case "sep":
+        visitSep(node);
+        return;
     case "cmd":
         if (visitCmd(node))
             return;

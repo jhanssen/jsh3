@@ -780,7 +780,9 @@ Napi::Value Launch(const Napi::CallbackInfo& info)
         for (size_t i = 0; i < props.Length(); ++i) {
             const auto k = props.Get(i);
             const auto v = obj.Get(k);
-            env.push_back(std::make_pair(k.As<Napi::String>().Utf8Value(), v.As<Napi::String>().Utf8Value()));
+            if (!v.IsUndefined()) {
+                env.push_back(std::make_pair(k.As<Napi::String>().Utf8Value(), v.As<Napi::String>().Utf8Value()));
+            }
         }
         proc->env = std::move(env);
     }
