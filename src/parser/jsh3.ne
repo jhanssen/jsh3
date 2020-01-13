@@ -76,7 +76,7 @@ const lexer = moo.states({
         jsbackesc: /\\./,
         jsbackend: { match: "`", pop: true },
         jsstart: { match: "${", push: "js" },
-        jsbackcontent: { match: /^(?:(?!(?:`|\${|\\)).)+/, lineBreaks: true }
+        jsbackcontent: { match: /(?:(?!(?:`|\${|\\)).)+/, lineBreaks: true }
     }
 });
 
