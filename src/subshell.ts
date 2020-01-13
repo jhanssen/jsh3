@@ -51,28 +51,6 @@ async function runCmd(cmds: any, opts: ProcessOptions): Promise<CmdResult> {
         const rcmd = await pathify(cmd);
         const proc = new Process(rcmd, args, env, opts);
 
-        /*
-        const readProcess = async () => {
-            if (!opts.destination)
-                return;
-            for await (const buf of proc.stdout) {
-                opts.destination.write(buf);
-            }
-            opts.destination.end();
-        };
-
-        if (opts.source) {
-            const source = opts.source;
-            source.on("data", buf => {
-                proc.stdin.write(buf);
-            });
-            source.on("end", () => {
-                proc.stdin.end();
-                source.removeAllListeners();
-            });
-        }
-        */
-
         envPop();
 
         return {
@@ -496,56 +474,49 @@ class SubshellWriter extends Writable
 {
     private _buffers: { buf: Buffer, callback: WriteCallbackFunction }[];
     private _finalcb: WriteFinalFunction | undefined;
-    private _resolver: WriteResolveFunction | undefined;
+    private _paused: boolean;
 
     constructor() {
         super();
 
+        this._paused = true;
         this._buffers = [];
+
+        this.once("newListener", event => {
+            if (event === "data") {
+                this._paused = false;
+
+                process.nextTick(() => {
+                    for (const buf of this._buffers) {
+                        buf.callback(null);
+                        this.emit("data", buf.buf);
+                    }
+                    this._buffers = [];
+                    if (this._finalcb) {
+                        this._finalcb();
+                        this.emit("end");
+                        this._finalcb = undefined;
+                    }
+                });
+            }
+        });
     }
 
     _write(buf: Buffer, encoding: string, callback: (err: any) => void) {
-        if (this._resolver) {
-            callback(null);
-            this._resolver({ done: false, value: buf });
-            this._resolver = undefined;
-        } else {
+        if (this._paused) {
             this._buffers.push({ buf: buf, callback: callback });
+        } else {
+            callback(null);
+            this.emit("data", buf);
         }
     }
 
     _final(callback: WriteFinalFunction) {
-        if (this._resolver) {
-            callback();
-            this._resolver({ done: true, value: undefined });
-            this._resolver = undefined;
-        } else {
+        if (this._paused) {
             this._finalcb = callback;
-        }
-    }
-
-    [Symbol.asyncIterator]() {
-        return {
-            that: this,
-            next(): Promise<IteratorResult<Buffer | undefined>> {
-                return new Promise((resolve, reject) => {
-                    const that = this.that;
-                    if (that._buffers.length > 0) {
-                        const buf = that._buffers.shift();
-                        if (buf === undefined) {
-                            throw new Error("shifted undefined in SubshellWriter");
-                        }
-                        buf.callback(null);
-                        resolve({ done: false, value: buf.buf });
-                    } else if (that._finalcb) {
-                        that._finalcb();
-                        that._finalcb = undefined;
-                        resolve({ done: true, value: undefined });
-                    } else {
-                        that._resolver = resolve;
-                    }
-                });
-            }
+        } else {
+            callback();
+            this.emit("end");
         }
     }
 }
