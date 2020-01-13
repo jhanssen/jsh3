@@ -111,10 +111,14 @@ class Pipe
                         // console.log("will run", will);
                         switch (will.type) {
                         case "subshell":
-                            subshell(will, this._opts).then(val => { resolve({ done: false, value: val }); });
+                            subshell(will, this._opts)
+                                .then(val => { resolve({ done: false, value: val }); })
+                                .catch(e => { reject(e); });
                             break;
                         case "cmd":
-                            runCmd(will, this._opts).then(val => { resolve({ done: false, value: val }); });
+                            runCmd(will, this._opts)
+                                .then(val => { resolve({ done: false, value: val }); })
+                                .catch(e => { reject(e); });
                             break;
                         default:
                             reject(`Invalid cmd type ${will.type}`);
