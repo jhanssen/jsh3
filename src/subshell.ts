@@ -523,9 +523,8 @@ class SubshellWriter extends Writable
 
         this.once("newListener", event => {
             if (event === "data") {
-                this._paused = false;
-
                 process.nextTick(() => {
+                    this._paused = false;
                     for (const buf of this._buffers) {
                         buf.callback(null);
                         this.emit("data", buf.buf);
