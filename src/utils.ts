@@ -12,7 +12,7 @@ export function pathify(cmd: string): Promise<string> {
             resolve(cmd);
             return;
         }
-        const paths = (env.PATH || "").split(":");
+        const paths = (env().PATH || "").split(":");
 
         let num = 0;
         const reject1 = () => {

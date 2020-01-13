@@ -2,7 +2,7 @@ import { runSubshell } from "./subshell";
 import { env } from "./variable";
 
 function expandVariable(value: any) {
-    return env[value.value] || "";
+    return env()[value.value] || "";
 }
 
 export async function expand(value: any): Promise<any> {

@@ -3,7 +3,7 @@ import { Readable, Writable } from "stream";
 import { Streamable } from "./streamable";
 import { pathify } from "./utils";
 import { expand } from "./expand";
-import { env } from "./variable";
+import { env as envGet, push as envPush, pop as envPop } from "./variable";
 import { commands as internalCommands } from "./commands";
 
 interface Options
@@ -250,13 +250,25 @@ async function subshell(cmds: any, opts?: Options): Promise<number | undefined> 
     if (cmds.subshell.type !== "sep") {
         throw new Error(`No sep inside of subshell`);
     }
-    const seps = new CommandSeparators(cmds.subshell.sep, subopts);
+
     let rp: number | undefined = undefined;
-    for await (const s of seps) {
-        if (s === undefined)
-            continue;
-        rp = s;
+
+    envPush();
+
+    try {
+        const seps = new CommandSeparators(cmds.subshell.sep, subopts);
+        for await (const s of seps) {
+            if (s === undefined)
+                continue;
+            rp = s;
+        }
+    } catch (e) {
+        envPop();
+        throw e;
     }
+
+    envPop();
+
     return rp;
 }
 
@@ -268,47 +280,58 @@ export interface SubshellResult {
 export async function runSubshell(cmds: any): Promise<SubshellResult> {
     let opts: Options | undefined;
     let seps: CommandSeparators | undefined;
-    switch (cmds.type) {
-    case "subshellOut":
-        opts = {
-            readable: new SubshellReader(),
-            writable: new SubshellWriter()
-        }
-        // fall through
-    case "subshell":
-        seps = new CommandSeparators(cmds.subshell.sep, opts);
-        break;
-    }
-
-    if (seps === undefined) {
-        throw new Error(`Invalid subshell type: ${cmds.type}`);
-    }
 
     const result: SubshellResult = {
         status: undefined,
         stdout: undefined
     };
 
-    if (opts) {
-        const o = opts;
-        o.writable.end();
-        o.readable.on("data", chunk => {
-            if (result.stdout === undefined) {
-                result.stdout = chunk;
-            } else {
-                result.stdout = Buffer.concat([result.stdout, chunk]);
-            }
-        });
-        o.readable.on("end", () => {
-            o.readable.removeAllListeners();
-        });
+    envPush();
+
+    try {
+        switch (cmds.type) {
+            case "subshellOut":
+                opts = {
+                    readable: new SubshellReader(),
+                    writable: new SubshellWriter()
+                }
+                // fall through
+            case "subshell":
+                seps = new CommandSeparators(cmds.subshell.sep, opts);
+                break;
+        }
+
+        if (seps === undefined) {
+            throw new Error(`Invalid subshell type: ${cmds.type}`);
+        }
+
+        if (opts) {
+            const o = opts;
+            o.writable.end();
+            o.readable.on("data", chunk => {
+                if (result.stdout === undefined) {
+                    result.stdout = chunk;
+                } else {
+                    result.stdout = Buffer.concat([result.stdout, chunk]);
+                }
+            });
+            o.readable.on("end", () => {
+                o.readable.removeAllListeners();
+            });
+        }
+
+        for await (const s of seps) {
+            if (s === undefined)
+                continue;
+            result.status = s;
+        }
+    } catch (e) {
+        envPop();
+        throw e;
     }
 
-    for await (const s of seps) {
-        if (s === undefined)
-            continue;
-        result.status = s;
-    }
+    envPop();
+
     return result;
 }
 
