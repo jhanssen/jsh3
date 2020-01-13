@@ -44,7 +44,7 @@ async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<
             return {
                 stdin: undefined,
                 stdout: undefined,
-                promise: internalCmd(args, env)
+                promise: internalCmd(args, env, source)
             };
         }
 
