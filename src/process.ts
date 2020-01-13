@@ -7,7 +7,6 @@ import {
 } from "../native/process";
 
 import { Readable, Writable } from "stream";
-import { Streamable } from "./streamable";
 
 class ProcessWriter extends Writable
 {
@@ -83,7 +82,7 @@ class ProcessReader extends Readable
     }
 }
 
-export class Process implements Streamable
+export class Process
 {
     private _launch: NativeProcessLaunch;
 

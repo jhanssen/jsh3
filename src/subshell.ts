@@ -1,6 +1,5 @@
 import { ReadProcess, Process, ProcessOptions } from "./process";
 import { Readable, Writable, Duplex } from "stream";
-import { Streamable } from "./streamable";
 import { pathify } from "./utils";
 import { expand } from "./expand";
 import { env as envGet, push as envPush, pop as envPop } from "./variable";
