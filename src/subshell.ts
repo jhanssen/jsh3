@@ -13,54 +13,73 @@ interface Options
 }
 
 async function runCmd(cmds: any, opts?: Options) {
-    if (cmds.assignments !== undefined) {
-        console.log("will run assignments");
-    }
+    envPush();
 
-    const ps = [];
-    for (const id of cmds.cmd) {
-        ps.push(expand(id));
-    }
+    let status: number | undefined;
 
-    const args = await Promise.all(ps);
-    const cmd: string = args.shift();
-    if (!cmd)
-        return;
-
-    if (cmd in internalCommands) {
-        const internalCmd = internalCommands[cmd as keyof typeof internalCommands];
-        return await internalCmd(args, env);
-    }
-
-    const rcmd = await pathify(cmd);
-
-    const procOpts = {
-        redirectStdin: (opts && opts.writable) ? true : false,
-        redirectStdout: (opts && opts.readable) ? true : false,
-        redirectStderr: false
-    };
-    const proc = new Process(rcmd, args, env, procOpts);
-
-    const readProcess = async () => {
-        if (!opts || !opts.writable)
-            return;
-        for await (const buf of proc.stdout) {
-            opts.readable._write(buf);
+    try {
+        const env = envGet();
+        if (cmds.assignments !== undefined) {
+            for (const a of cmds.assignments) {
+                // key has to be a number or identifier
+                const key = a.key.value.toString();
+                const val = await expand(a.value);
+                //console.log(`expanded ${key} to '${val.toString().trimRight()}'`);
+                env[key] = val.toString().trimRight();
+            }
         }
-        opts.readable._write(null);
-    };
 
-    const writeProcess = async () => {
-        if (!opts || !opts.readable)
-            return;
-        for await (const buf of opts.writable) {
-            proc.stdin.write(buf);
+        const ps = [];
+        for (const id of cmds.cmd) {
+            ps.push(expand(id));
         }
-        proc.stdin.end();
-    };
 
-    const all = await Promise.all([readProcess(), writeProcess(), proc.status]);
-    return all[2];
+        const args = await Promise.all(ps);
+        const cmd: string = args.shift();
+        if (!cmd)
+            return;
+
+        if (cmd in internalCommands) {
+            const internalCmd = internalCommands[cmd as keyof typeof internalCommands];
+            return await internalCmd(args, env);
+        }
+
+        const rcmd = await pathify(cmd);
+
+        const procOpts = {
+            redirectStdin: (opts && opts.writable) ? true : false,
+            redirectStdout: (opts && opts.readable) ? true : false,
+            redirectStderr: false
+        };
+        const proc = new Process(rcmd, args, env, procOpts);
+
+        const readProcess = async () => {
+            if (!opts || !opts.writable)
+                return;
+            for await (const buf of proc.stdout) {
+                opts.readable._write(buf);
+            }
+            opts.readable._write(null);
+        };
+
+        const writeProcess = async () => {
+            if (!opts || !opts.readable)
+                return;
+            for await (const buf of opts.writable) {
+                proc.stdin.write(buf);
+            }
+            proc.stdin.end();
+        };
+
+        const all = await Promise.all([readProcess(), writeProcess(), proc.status]);
+        status = all[2];
+    } catch (e) {
+        envPop();
+        throw e;
+    }
+
+    envPop();
+    return status;
 }
 
 class Pipe
