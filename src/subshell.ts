@@ -147,10 +147,19 @@ class Pipe
                 };
                 const ret = runInNewContext(jscode, ctx);
                 if (typeof ret === "number") {
-                    return ret;
+                    all.push({
+                        stdout: undefined,
+                        stdin: undefined,
+                        promise: Promise.resolve(ret)
+                    });
                 } else {
+                    // ### should make a stdout stream with ret here
                     console.log(ret);
-                    return 0;
+                    all.push({
+                        stdout: undefined,
+                        stdin: undefined,
+                        promise: Promise.resolve(0)
+                    });
                 }
             }
         }
