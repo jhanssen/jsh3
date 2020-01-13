@@ -32,12 +32,14 @@ class ProcessWriter extends Writable
     }
 }
 
+type BufferOrNull = Buffer | null;
+
 class ProcessReader extends Readable
 {
     private _launch: NativeProcessLaunch;
     private _ctx: NativeProcessOut;
     private _paused: boolean;
-    private _buffers: Buffer[];
+    private _buffers: BufferOrNull[];
 
     constructor(ctx: NativeProcessOut, launch: NativeProcessLaunch) {
         super();
@@ -55,7 +57,11 @@ class ProcessReader extends Readable
             }
         });
         launch.promise.then(() => {
-            this.push(null);
+            if (this._paused) {
+                this._buffers.push(null);
+            } else {
+                this.push(null);
+            }
         }).catch(e => {
             this.push(null);
         });
@@ -119,6 +125,8 @@ export class Process implements Streamable
         }
     }
 }
+
+export { NativeProcessOptions as ProcessOptions };
 
 export interface ReadProcess {
     status: number | undefined;

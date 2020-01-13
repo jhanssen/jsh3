@@ -317,6 +317,7 @@ void Reader::start(const Napi::Env& env)
                                      MutexLocker locker(&reader->mutex);
                                      if (!proc->newPendingWrite.empty()) {
                                          std::move(std::begin(proc->newPendingWrite), std::end(proc->newPendingWrite), std::back_inserter(proc->pendingWrite));
+                                         proc->newPendingWrite.clear();
                                      }
                                  }
                                  if (!proc->pendingWrite.empty() && !proc->needsWrite) {

@@ -1,21 +1,20 @@
-import { ReadProcess, Process } from "./process";
-import { Readable, Writable } from "stream";
+import { ReadProcess, Process, ProcessOptions } from "./process";
+import { Readable, Writable, Duplex } from "stream";
 import { Streamable } from "./streamable";
 import { pathify } from "./utils";
 import { expand } from "./expand";
 import { env as envGet, push as envPush, pop as envPop } from "./variable";
 import { commands as internalCommands } from "./commands";
 
-interface Options
+interface CmdResult
 {
-    readable: SubshellReader;
-    writable: SubshellWriter;
+    stdin: Writable | undefined;
+    stdout: Readable | undefined;
+    promise: Promise<number | undefined>;
 }
 
-async function runCmd(cmds: any, opts?: Options) {
+async function runCmd(cmds: any, opts: ProcessOptions): Promise<CmdResult> {
     envPush();
-
-    let status: number | undefined;
 
     try {
         const env = envGet();
@@ -36,107 +35,176 @@ async function runCmd(cmds: any, opts?: Options) {
 
         const args = await Promise.all(ps);
         const cmd: string | undefined = args.shift();
-        if (!cmd)
-            return;
+        if (!cmd) {
+            throw new Error(`No cmd`);
+        }
 
         if (cmd in internalCommands) {
             const internalCmd = internalCommands[cmd as keyof typeof internalCommands];
-            return await internalCmd(args, env);
+            return {
+                stdin: undefined,
+                stdout: undefined,
+                promise: internalCmd(args, env)
+            };
         }
 
         const rcmd = await pathify(cmd);
+        const proc = new Process(rcmd, args, env, opts);
 
-        const procOpts = {
-            redirectStdin: (opts && opts.writable) ? true : false,
-            redirectStdout: (opts && opts.readable) ? true : false,
-            redirectStderr: false
-        };
-        const proc = new Process(rcmd, args, env, procOpts);
-
+        /*
         const readProcess = async () => {
-            if (!opts || !opts.writable)
+            if (!opts.destination)
                 return;
             for await (const buf of proc.stdout) {
-                opts.readable._write(buf);
+                opts.destination.write(buf);
             }
-            opts.readable._write(null);
+            opts.destination.end();
         };
 
-        const writeProcess = async () => {
-            if (!opts || !opts.readable)
-                return;
-            for await (const buf of opts.writable) {
+        if (opts.source) {
+            const source = opts.source;
+            source.on("data", buf => {
                 proc.stdin.write(buf);
-            }
-            proc.stdin.end();
-        };
+            });
+            source.on("end", () => {
+                proc.stdin.end();
+                source.removeAllListeners();
+            });
+        }
+        */
 
-        const all = await Promise.all([readProcess(), writeProcess(), proc.status]);
-        status = all[2];
+        envPop();
+
+        return {
+            stdin: opts.redirectStdin ? proc.stdin : undefined,
+            stdout: opts.redirectStdout ? proc.stdout : undefined,
+            promise: proc.status
+        };
     } catch (e) {
         envPop();
         throw e;
     }
+}
 
-    envPop();
-    return status;
+interface SubshellOptions
+{
+    readable?: SubshellReader;
+    writable?: SubshellWriter;
 }
 
 class Pipe
 {
     private _pipes: any;
-    private _opts: Options | undefined;
+    private _opts: SubshellOptions;
 
-    constructor(pipes: any, opts?: Options) {
+    constructor(pipes: any, opts: SubshellOptions) {
         this._pipes = pipes;
         this._opts = opts;
     }
 
-    [Symbol.asyncIterator]() {
-        return {
-            _idx: 0,
-            _opts: this._opts,
-            _pipes: this._pipes,
-            next(): Promise<IteratorResult<number | undefined>> {
-                if (this._idx >= this._pipes.length) {
-                    return Promise.resolve({ done: true, value: undefined });
-                } else {
-                    return new Promise((resolve, reject) => {
-                        // if this is the last entry in the pipe list then we should write directly to stdout
-                        // unless we're in a $() expansion, in which case we'll do substitution
-                        const redirStdout = this._opts !== undefined || this._idx < this._pipes.length - 1;
-                        const redirStdin = this._idx > 0;
+    async execute(): Promise<number | undefined> {
+        // launch all processes, then pipe their inputs / outputs
+        const all: CmdResult[] = [];
 
-                        const will = this._pipes[this._idx++];
-                        // console.log("will run", will);
-                        switch (will.type) {
-                        case "subshell":
-                            subshell(will, this._opts)
-                                .then(val => { resolve({ done: false, value: val }); })
-                                .catch(e => { reject(e); });
-                            break;
-                        case "cmd":
-                            runCmd(will, this._opts)
-                                .then(val => { resolve({ done: false, value: val }); })
-                                .catch(e => { reject(e); });
-                            break;
-                        default:
-                            reject(`Invalid cmd type ${will.type}`);
-                            break;
-                        }
-                    });
+        // if we have an existing subshell readable, that should be the destination of our last entry in the pipe chain
+        const finalDestination: Writable | undefined = this._opts.readable;
+        // and if we have an existing subshell writable, that should feed into our first stdin
+        let firstSource: Readable | undefined;
+        if (this._opts.writable) {
+            const owritable = this._opts.writable;
+            // fucking typescript
+            const ofirstSource = new SubshellReader();
+            firstSource = ofirstSource;
+            owritable.on("data", buf => {
+                ofirstSource.write(buf);
+            });
+            owritable.on("end", () => {
+                ofirstSource.end();
+                owritable.removeAllListeners();
+            });
+        }
+
+        let source: Readable | undefined = firstSource;
+        const pnum = this._pipes.length;
+        for (let i = 0; i < pnum; ++i) {
+            const p = this._pipes[i];
+            switch (p.type) {
+            case "cmd":
+                all.push(await runCmd(p, {
+                    redirectStdin: source !== undefined || i > 0,
+                    redirectStdout : i < pnum - 1 || finalDestination !== undefined,
+                    redirectStderr: false
+                }));
+                break;
+            case "subshell":
+                let subopts: SubshellOptions = {};
+                if (i < pnum - 1 || finalDestination !== undefined) {
+                    subopts.readable = new SubshellReader();
                 }
+                if (source !== undefined || i > 0) {
+                    subopts.writable = new SubshellWriter();
+                }
+                all.push({
+                    stdout: subopts.readable,
+                    stdin: subopts.writable,
+                    promise: subshell(p, subopts)
+                });
+                break;
             }
         }
+
+        const promises: Promise<number | undefined>[] = [];
+        const anum = all.length;
+        for (let i = 0; i < anum; ++i) {
+            const a = all[i];
+            if (i === 0) {
+                // pipe firstSource to stdin if it exists
+                if (firstSource !== undefined) {
+                    if (a.stdin === undefined) {
+                        throw new Error("Have firstSource but no stdin");
+                    }
+                    firstSource.pipe(a.stdin);
+                } else if (a.stdin !== undefined) {
+                    throw new Error("No firstSource but have stdin");
+                }
+            }
+            if (i < anum - 1) {
+                // pipe previous to next
+                const n = all[i + 1];
+                if (a.stdout === undefined) {
+                    throw new Error("No stdout");
+                }
+                if (n.stdin === undefined) {
+                    throw new Error("No stdin");
+                }
+                a.stdout.pipe(n.stdin);
+            } else if (i === anum - 1) {
+                // at end
+                if (finalDestination !== undefined) {
+                    if (a.stdout === undefined) {
+                        throw new Error("Have finalDestination but no stdout");
+                    }
+                    a.stdout.pipe(finalDestination);
+                } else if (a.stdout !== undefined) {
+                    throw new Error("No finalDestination but have stdout");
+                }
+            }
+            promises.push(a.promise);
+        }
+
+        const results = await Promise.all(promises);
+
+        // resolve with the exit code of the last pipe entry
+        return results[results.length - 1];
     }
 }
 
 class LogicalOperations
 {
     private _logicals: any;
-    private _opts: Options | undefined;
+    private _opts: SubshellOptions;
 
-    constructor(logicals: any, opts?: Options) {
+    constructor(logicals: any, opts: SubshellOptions) {
         this._logicals = logicals;
         this._opts = opts;
     }
@@ -192,9 +260,9 @@ class LogicalOperations
 class CommandSeparators
 {
     private _seps: any;
-    private _opts: Options | undefined;
+    private _opts: SubshellOptions;
 
-    constructor(seps: any, opts?: Options) {
+    constructor(seps: any, opts: SubshellOptions) {
         this._seps = seps;
         this._opts = opts;
     }
@@ -228,21 +296,15 @@ class CommandSeparators
     }
 }
 
-async function pipe(cmds: any, opts?: Options): Promise<number | undefined> {
+async function pipe(cmds: any, opts: SubshellOptions): Promise<number | undefined> {
     if (cmds.type !== "pipe") {
         throw new Error(`Invalid logical type ${cmds.type}`);
     }
     const pipes = new Pipe(cmds.pipe, opts);
-    let rp: number | undefined;
-    for await (const p of pipes) {
-        if (p === undefined)
-            continue;
-        rp = p;
-    }
-    return rp;
+    return await pipes.execute();
 }
 
-async function logical(cmds: any, opts?: Options): Promise<number | undefined> {
+async function logical(cmds: any, opts: SubshellOptions): Promise<number | undefined> {
     if (cmds.type !== "logical") {
         throw new Error(`Invalid logical type ${cmds.type}`);
     }
@@ -256,8 +318,8 @@ async function logical(cmds: any, opts?: Options): Promise<number | undefined> {
     return rp;
 }
 
-async function subshell(cmds: any, opts?: Options): Promise<number | undefined> {
-    let subopts: Options | undefined;
+async function subshell(cmds: any, opts: SubshellOptions): Promise<number | undefined> {
+    let subopts: SubshellOptions | undefined;
     if (cmds.type === "subshell") {
         subopts = opts;
     } else if (cmds.type === "subshellOut") {
@@ -299,7 +361,7 @@ export interface SubshellResult {
 }
 
 export async function runSubshell(cmds: any): Promise<SubshellResult> {
-    let opts: Options | undefined;
+    let opts: SubshellOptions = {};
     let seps: CommandSeparators | undefined;
 
     const result: SubshellResult = {
@@ -312,10 +374,8 @@ export async function runSubshell(cmds: any): Promise<SubshellResult> {
     try {
         switch (cmds.type) {
             case "subshellOut":
-                opts = {
-                    readable: new SubshellReader(),
-                    writable: new SubshellWriter()
-                }
+                opts.readable = new SubshellReader(),
+                opts.writable = new SubshellWriter();
                 // fall through
             case "subshell":
                 seps = new CommandSeparators(cmds.subshell.sep, opts);
@@ -326,18 +386,20 @@ export async function runSubshell(cmds: any): Promise<SubshellResult> {
             throw new Error(`Invalid subshell type: ${cmds.type}`);
         }
 
-        if (opts) {
-            const o = opts;
-            o.writable.end();
-            o.readable.on("data", chunk => {
+        if (opts.writable) {
+            opts.writable.end();
+        }
+        if (opts.readable) {
+            const readable = opts.readable;
+            readable.on("data", chunk => {
                 if (result.stdout === undefined) {
                     result.stdout = chunk;
                 } else {
                     result.stdout = Buffer.concat([result.stdout, chunk]);
                 }
             });
-            o.readable.on("end", () => {
-                o.readable.removeAllListeners();
+            readable.on("end", () => {
+                readable.removeAllListeners();
             });
         }
 
@@ -360,7 +422,7 @@ export async function runSeparators(cmds: any): Promise<number | undefined> {
     if (cmds.type !== "sep") {
         throw new Error(`Invalid sep type ${cmds.type}`);
     }
-    const seps = new CommandSeparators(cmds.sep);
+    const seps = new CommandSeparators(cmds.sep, {});
     let rp: number | undefined = undefined;
     for await (const s of seps) {
         if (s === undefined)
@@ -370,12 +432,13 @@ export async function runSeparators(cmds: any): Promise<number | undefined> {
     return rp;
 }
 
-type BufferOrNull = Buffer | null;
+type WriteFinalFunction = () => void;
+type WriteCallbackFunction = (err: any) => void;
 
-class SubshellReader extends Readable
+class SubshellReader extends Duplex
 {
     private _paused: boolean;
-    private _buffers: BufferOrNull[];
+    private _buffers: { buf: Buffer | null, callback: WriteCallbackFunction | WriteFinalFunction }[];
 
     constructor() {
         super();
@@ -386,7 +449,9 @@ class SubshellReader extends Readable
 
     _read(size: number) {
         for (let i = 0; i < this._buffers.length; ++i) {
-            if (!this.push(this._buffers[i])) {
+            const data = this._buffers[i];
+            this._callCallback(data);
+            if (!this.push(data.buf)) {
                 // we got so far
                 this._buffers.splice(0, i + 1);
                 return;
@@ -396,19 +461,35 @@ class SubshellReader extends Readable
         this._paused = false;
     }
 
-    _write(buf: Buffer | null) {
+    _write(buf: Buffer, encoding: string, callback: WriteCallbackFunction) {
         if (this._paused) {
-            this._buffers.push(buf);
+            this._buffers.push({ buf: buf, callback: callback });
         } else {
             if (!this.push(buf)) {
                 this._paused = true;
             }
+            callback(null);
+        }
+    }
+
+    _final(callback: WriteFinalFunction) {
+        if (this._paused) {
+            this._buffers.push({ buf: null, callback: callback });
+        } else {
+            this.push(null);
+            callback();
+        }
+    }
+
+    _callCallback(data: { buf: Buffer | null, callback: WriteCallbackFunction | WriteFinalFunction }) {
+        if (data.buf === null) {
+            (data.callback as WriteFinalFunction)();
+        } else {
+            (data.callback as WriteCallbackFunction)(null);
         }
     }
 }
 
-type WriteFinalFunction = () => void;
-type WriteCallbackFunction = (err: any) => void;
 type WriteResolveFunction = (value?: IteratorResult<Buffer | undefined> | PromiseLike<IteratorResult<Buffer | undefined>>) => void;
 
 class SubshellWriter extends Writable
@@ -433,7 +514,7 @@ class SubshellWriter extends Writable
         }
     }
 
-    _final(callback: () => void) {
+    _final(callback: WriteFinalFunction) {
         if (this._resolver) {
             callback();
             this._resolver({ done: true, value: undefined });
