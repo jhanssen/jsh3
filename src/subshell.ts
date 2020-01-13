@@ -185,8 +185,6 @@ class LogicalOperations
     }
 }
 
-type UpdateStreamableFunction = (streamable: Streamable) => void;
-
 class CommandSeparators
 {
     private _seps: any;
