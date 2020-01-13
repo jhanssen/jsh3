@@ -261,8 +261,8 @@ function visitJS(node: any, line: string) {
     }
 }
 
-function visitSep(node: any) {
-    runSeparators(node).then(arg => {
+function visitSep(node: any, line: string) {
+    runSeparators(node, line).then(arg => {
         console.log("done sep", arg);
     });
 }
@@ -277,7 +277,7 @@ function visit(node: any, line: string) {
 
     switch (node.type) {
     case "sep":
-        visitSep(node);
+        visitSep(node, line);
         return;
     case "cmd":
         if (visitCmd(node))

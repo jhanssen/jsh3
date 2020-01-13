@@ -4,6 +4,7 @@ import { pathify } from "./utils";
 import { expand } from "./expand";
 import { env as envGet, push as envPush, pop as envPop } from "./variable";
 import { commands as internalCommands } from "./commands";
+import { runInNewContext } from "vm";
 
 interface CmdResult
 {
@@ -12,7 +13,7 @@ interface CmdResult
     promise: Promise<number | undefined>;
 }
 
-async function runCmd(cmds: any, opts: ProcessOptions): Promise<CmdResult> {
+async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<CmdResult> {
     envPush();
 
     try {
@@ -21,7 +22,7 @@ async function runCmd(cmds: any, opts: ProcessOptions): Promise<CmdResult> {
             for (const a of cmds.assignments) {
                 // key has to be a number or identifier
                 const key = a.key.value.toString();
-                const val = await expand(a.value);
+                const val = await expand(a.value, source);
                 //console.log(`expanded ${key} to '${val}'`);
                 env[key] = val;
             }
@@ -29,7 +30,7 @@ async function runCmd(cmds: any, opts: ProcessOptions): Promise<CmdResult> {
 
         const ps = [];
         for (const id of cmds.cmd) {
-            ps.push(expand(id));
+            ps.push(expand(id, source));
         }
 
         const args = await Promise.all(ps);
@@ -72,10 +73,12 @@ interface SubshellOptions
 class Pipe
 {
     private _pipes: any;
+    private _source: string;
     private _opts: SubshellOptions;
 
-    constructor(pipes: any, opts: SubshellOptions) {
+    constructor(pipes: any, source: string, opts: SubshellOptions) {
         this._pipes = pipes;
+        this._source = source;
         this._opts = opts;
     }
 
@@ -107,7 +110,7 @@ class Pipe
             const p = this._pipes[i];
             switch (p.type) {
             case "cmd":
-                all.push(await runCmd(p, {
+                all.push(await runCmd(p, this._source, {
                     redirectStdin: source !== undefined || i > 0,
                     redirectStdout : i < pnum - 1 || finalDestination !== undefined,
                     redirectStderr: false
@@ -124,9 +127,30 @@ class Pipe
                 all.push({
                     stdout: subopts.readable,
                     stdin: subopts.writable,
-                    promise: subshell(p, subopts)
+                    promise: subshell(p, this._source, subopts)
                 });
                 break;
+            case "jscode":
+                const jscode = this._source.substr(p.start + 1, p.end - p.start - 1);
+                let args: string[] | undefined;
+                if (p.args instanceof Array) {
+                    const ps: Promise<string>[] = [];
+                    for (const arg of p.args) {
+                        ps.push(expand(arg, this._source));
+                    }
+                    args = await Promise.all(ps);
+                }
+
+                const ctx = {
+                    args: args || []
+                };
+                const ret = runInNewContext(jscode, ctx);
+                if (typeof ret === "number") {
+                    return ret;
+                } else {
+                    console.log(ret);
+                    return 0;
+                }
             }
         }
 
@@ -179,10 +203,12 @@ class Pipe
 class LogicalOperations
 {
     private _logicals: any;
+    private _source: string;
     private _opts: SubshellOptions;
 
-    constructor(logicals: any, opts: SubshellOptions) {
+    constructor(logicals: any, source: string, opts: SubshellOptions) {
         this._logicals = logicals;
+        this._source = source;
         this._opts = opts;
     }
 
@@ -190,6 +216,7 @@ class LogicalOperations
         return {
             _idx: 0,
             _done: false,
+            _source: this._source,
             _opts: this._opts,
             _logicals: this._logicals,
             next(): Promise<IteratorResult<number | undefined>> {
@@ -201,7 +228,7 @@ class LogicalOperations
                         const operand = this._logicals[this._idx];
                         this._idx += 2;
                         if (operand.type === "pipe") {
-                            pipe(operand, this._opts)
+                            pipe(operand, this._source, this._opts)
                                 .then(val => {
                                     if (val === undefined) {
                                         resolve({ done: false, value: undefined });
@@ -214,7 +241,7 @@ class LogicalOperations
                                     resolve({ done: false, value: val });
                                 }).catch(reject);
                         } else if (operand.type === "subshell" || operand.type === "subshellOut") {
-                            subshell(operand, this._opts)
+                            subshell(operand, this._source, this._opts)
                                 .then(val => {
                                     if (val === undefined) {
                                         resolve({ done: false, value: undefined });
@@ -237,10 +264,12 @@ class LogicalOperations
 class CommandSeparators
 {
     private _seps: any;
+    private _source: string;
     private _opts: SubshellOptions;
 
-    constructor(seps: any, opts: SubshellOptions) {
+    constructor(seps: any, source: string, opts: SubshellOptions) {
         this._seps = seps;
+        this._source = source;
         this._opts = opts;
     }
 
@@ -248,6 +277,7 @@ class CommandSeparators
         return {
             _idx: 0,
             _seps: this._seps,
+            _source: this._source,
             _opts: this._opts,
             next(): Promise<IteratorResult<number | undefined>> {
                 if (this._idx >= this._seps.length) {
@@ -256,11 +286,11 @@ class CommandSeparators
                     return new Promise((resolve, reject) => {
                         const item = this._seps[this._idx++];
                         if (item.type === "logical") {
-                            logical(item, this._opts)
+                            logical(item, this._source, this._opts)
                                 .then(val => { resolve({ done: false, value: val }); })
                                 .catch(reject);
                         } else if (item.type === "subshell" || item.type === "subshellOut") {
-                            subshell(item, this._opts)
+                            subshell(item, this._source, this._opts)
                                 .then(val => { resolve({ done: false, value: val }); })
                                 .catch(reject);
                         } else {
@@ -273,19 +303,19 @@ class CommandSeparators
     }
 }
 
-async function pipe(cmds: any, opts: SubshellOptions): Promise<number | undefined> {
+async function pipe(cmds: any, source: string, opts: SubshellOptions): Promise<number | undefined> {
     if (cmds.type !== "pipe") {
         throw new Error(`Invalid logical type ${cmds.type}`);
     }
-    const pipes = new Pipe(cmds.pipe, opts);
+    const pipes = new Pipe(cmds.pipe, source, opts);
     return await pipes.execute();
 }
 
-async function logical(cmds: any, opts: SubshellOptions): Promise<number | undefined> {
+async function logical(cmds: any, source: string, opts: SubshellOptions): Promise<number | undefined> {
     if (cmds.type !== "logical") {
         throw new Error(`Invalid logical type ${cmds.type}`);
     }
-    const logicals = new LogicalOperations(cmds.logical, opts);
+    const logicals = new LogicalOperations(cmds.logical, source, opts);
     let rp: number | undefined = undefined;
     for await (const nrp of logicals) {
         if (nrp === undefined)
@@ -295,7 +325,7 @@ async function logical(cmds: any, opts: SubshellOptions): Promise<number | undef
     return rp;
 }
 
-async function subshell(cmds: any, opts: SubshellOptions): Promise<number | undefined> {
+async function subshell(cmds: any, source: string, opts: SubshellOptions): Promise<number | undefined> {
     let subopts: SubshellOptions | undefined;
     if (cmds.type === "subshell") {
         subopts = opts;
@@ -316,7 +346,7 @@ async function subshell(cmds: any, opts: SubshellOptions): Promise<number | unde
     envPush();
 
     try {
-        const seps = new CommandSeparators(cmds.subshell.sep, subopts);
+        const seps = new CommandSeparators(cmds.subshell.sep, source, subopts);
         for await (const s of seps) {
             if (s === undefined)
                 continue;
@@ -337,7 +367,7 @@ export interface SubshellResult {
     stdout: Buffer | undefined;
 }
 
-export async function runSubshell(cmds: any): Promise<SubshellResult> {
+export async function runSubshell(cmds: any, source: string): Promise<SubshellResult> {
     let opts: SubshellOptions = {};
     let seps: CommandSeparators | undefined;
 
@@ -355,7 +385,7 @@ export async function runSubshell(cmds: any): Promise<SubshellResult> {
                 opts.writable = new SubshellWriter();
                 // fall through
             case "subshell":
-                seps = new CommandSeparators(cmds.subshell.sep, opts);
+                seps = new CommandSeparators(cmds.subshell.sep, source, opts);
                 break;
         }
 
@@ -395,11 +425,11 @@ export async function runSubshell(cmds: any): Promise<SubshellResult> {
     return result;
 }
 
-export async function runSeparators(cmds: any): Promise<number | undefined> {
+export async function runSeparators(cmds: any, source: string): Promise<number | undefined> {
     if (cmds.type !== "sep") {
         throw new Error(`Invalid sep type ${cmds.type}`);
     }
-    const seps = new CommandSeparators(cmds.sep, {});
+    const seps = new CommandSeparators(cmds.sep, source, {});
     let rp: number | undefined = undefined;
     for await (const s of seps) {
         if (s === undefined)

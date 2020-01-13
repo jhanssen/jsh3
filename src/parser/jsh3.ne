@@ -87,11 +87,10 @@ const lexer = moo.states({
 cmds -> cmdsep
       | ifCondition
       | whileCondition
-      | jsCondition
 
 cmdsep -> cmdlogical (_ (%semi | (%amp %ex:?)) _ cmdlogical:?):* {% extractCmdSep %}
 cmdlogical -> cmdpipe (_ logical _ cmdpipe):* {% extractCmdLogical %}
-cmdpipe -> (cmd | subshell | subshellout) (_ %pipe _ (cmd | subshell | subshellout)):* {% extractCmdPipe %}
+cmdpipe -> (cmd | subshell | subshellout | js) (_ %pipe _ (cmd | subshell | subshellout | js)):* {% extractCmdPipe %}
 
 logical -> %and | %or
 amp -> null | %amp

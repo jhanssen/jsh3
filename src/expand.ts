@@ -11,15 +11,15 @@ function numberCoerce(value: number | undefined) {
     return value;
 }
 
-export async function expand(value: any): Promise<string> {
+export async function expand(value: any, source: string): Promise<string> {
     if (typeof value === "object" && "type" in value) {
         switch (value.type) {
         case "variable":
             return expandVariable(value);
         case "subshell":
-            return numberCoerce((await runSubshell(value)).status).toString();
+            return numberCoerce((await runSubshell(value, source)).status).toString();
         case "subshellOut":
-            return ((await runSubshell(value)).stdout || "").toString().trimRight();
+            return ((await runSubshell(value, source)).stdout || "").toString().trimRight();
         }
         if (value.value !== undefined) {
             return value.value.toString();
@@ -28,7 +28,7 @@ export async function expand(value: any): Promise<string> {
     if (value instanceof Array) {
         const ps = [];
         for (const sub of value) {
-            ps.push(expand(sub));
+            ps.push(expand(sub, source));
         }
         return (await Promise.all(ps)).join("");
     }
