@@ -1,0 +1,14 @@
+{
+  "name": "jspartial",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "acorn-loose": "^7.0.0"
+  }
+}
