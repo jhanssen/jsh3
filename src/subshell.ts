@@ -24,8 +24,8 @@ async function runCmd(cmds: any, opts?: Options) {
                 // key has to be a number or identifier
                 const key = a.key.value.toString();
                 const val = await expand(a.value);
-                //console.log(`expanded ${key} to '${val.toString().trimRight()}'`);
-                env[key] = val.toString().trimRight();
+                //console.log(`expanded ${key} to '${val}'`);
+                env[key] = val;
             }
         }
 
@@ -35,7 +35,7 @@ async function runCmd(cmds: any, opts?: Options) {
         }
 
         const args = await Promise.all(ps);
-        const cmd: string = args.shift();
+        const cmd: string | undefined = args.shift();
         if (!cmd)
             return;
 
