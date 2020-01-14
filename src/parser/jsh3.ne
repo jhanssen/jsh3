@@ -56,9 +56,10 @@ const lexer = moo.states({
     },
     jstype: {
         jstypestream: { match: "#", next: "js" },
-        jstypereturn: { match: "*", next: "js" },
+        jstypeiterable: { match: "*", next: "js" },
+        jstypereturn: { match: "^", next: "js" },
         jstypestring: { match: ":", next: "jstypestring" },
-        jscode: { match: /[^#*:]/, next: "js", lineBreaks: true }
+        jscode: { match: /[^#*^:]/, next: "js", lineBreaks: true }
     },
     jstypestring: {
         jstypestringcontent: { match: /[^\s]+/, next: "js" }
@@ -153,7 +154,7 @@ jsdoubleblock -> %jsdoubleesc
 jsbackblock -> jsblock
              | %jsbackesc
              | %jsbackcontent
-jstype -> %jstypestream | %jstypereturn | (%jstypestring %jstypestringcontent)
+jstype -> %jstypestream | %jstypeiterable | %jstypereturn | (%jstypestring %jstypestringcontent)
 jstypeblock -> %jsstart jstype:? _ (jspart):* _ %jsend
 jsblock -> %jsstart _ (jspart):* _ %jsend
 jspart -> jsblock

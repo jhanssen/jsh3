@@ -5,6 +5,11 @@ import { expand } from "./expand";
 import { env as envGet, push as envPush, pop as envPop } from "./variable";
 import { commands as internalCommands } from "./commands";
 import { runInNewContext } from "vm";
+import { format as consoleFormat } from "util";
+
+type VoidFunction = () => void;
+type StatusResolveFunction = (value?: number | undefined | PromiseLike<number | undefined>) => void;
+type RejectFunction = (reason?: any) => void;
 
 interface CmdResult
 {
@@ -131,7 +136,7 @@ class Pipe
                 });
                 break;
             case "jscode":
-                const jscode = this._source.substr(p.start + 1, p.end - p.start - 1);
+                let jscode = this._source.substr(p.start + 1, p.end - p.start - 1);
                 let args: string[] | undefined;
                 if (p.args instanceof Array) {
                     const ps: Promise<string>[] = [];
@@ -141,27 +146,134 @@ class Pipe
                     args = await Promise.all(ps);
                 }
 
-                const ctx = {
+                const ctx: {
+                    args: string[],
+                    runInNewContext: typeof runInNewContext | undefined,
+                    console: { log: typeof console.log, error: typeof console.error } | undefined
+                    stdout: Writable | undefined,
+                    stderr: Writable | undefined,
+                    stdin: Buffer | Readable | undefined
+                    resolve: StatusResolveFunction | undefined,
+                    reject: RejectFunction | undefined
+                } = {
                     args: args || [],
-                    console: console
+                    runInNewContext: undefined,
+                    console: undefined,
+                    stdout: undefined,
+                    stderr: undefined,
+                    stdin: undefined,
+                    resolve: undefined,
+                    reject: undefined
                 };
-                const ret = runInNewContext(jscode, ctx);
-                if (typeof ret === "number") {
-                    all.push({
-                        stdout: undefined,
-                        stdin: undefined,
-                        promise: Promise.resolve(ret)
+
+                let stdin: Writable | undefined;
+                let stdout: Readable | undefined;
+                let status: Promise<number | undefined> | undefined;
+
+                switch (p.jstype) {
+                case "return":
+                    // the function is synchronous, whatever is console.logged goes to stdout
+                    // and if the function returns a non-integer value that also goes to stdout.
+                    // stdin is a buffer that contains all data from the previous process in the pipe chain (if any).
+                    // the exit code is the integral value returned or 0 if none.
+
+                    const jstdout = new SubshellReader()
+
+                    // we need to replace jscode with code that waits until all the data from the previous entry has been read
+                    ctx.runInNewContext = runInNewContext;
+                    ctx.console = {
+                        log: (...args) => {
+                            const ret = consoleFormat(...args);
+                            jstdout.write(ret + "\n");
+                        },
+                        error: console.error.bind(console)
+                    };
+                    ctx.stdout = new SubshellWriter();
+                    ctx.stdout.on("data", buf => {
+                        jstdout.write(buf);
                     });
-                } else {
-                    const stdout = new Readable();
-                    stdout.push(Buffer.from(ret));
-                    stdout.push(null);
+                    ctx.stdout.on("end", () => {
+                        jstdout.end();
+                    });
+
+                    if (i < pnum - 1 || finalDestination !== undefined) {
+                        stdout = jstdout;
+                    } else {
+                        jstdout.pipe(process.stdout);
+                    }
+
+                    const jstdin = new SubshellWriter();
+                    ctx.stdin = new SubshellReader();
+
+                    (async function() {
+                        const ctxin = ctx.stdin as SubshellReader;
+                        for await (const buf of jstdin) {
+                            ctxin.write(buf);
+                        }
+                        ctxin.end();
+                    })();
+
+                    if (source !== undefined || i > 0) {
+                        stdin = jstdin;
+                    } else {
+                        jstdin.end();
+                    }
+
+                    status = new Promise<number | undefined>((resolve, reject) => {
+                        ctx.resolve = resolve;
+                        ctx.reject = reject;
+                    });
+
+                    const oldjscode = jscode.replace(/"/g, '\\"');
+                    jscode =
+                        "(async function() {\n" +
+                        "    let buf = undefined;\n" +
+                        "    for await (const nbuf of stdin) {\n" +
+                        "        if (buf === undefined) buf = nbuf;\n" +
+                        "        else buf = Buffer.concat([buf, nbuf]);\n" +
+                        "    }\n" +
+                        "    const nctx = {\n" +
+                        "        args: args,\n" +
+                        "        stdin: buf,\n" +
+                        "        console: console\n" +
+                        "    }\n" +
+                        `    const ret = runInNewContext("${oldjscode}", nctx);\n` +
+                        "    stdout.end();\n" +
+                        "    if (typeof ret === 'number') { resolve(ret); }\n" +
+                        "    else { console.log(ret); resolve(0); }\n" +
+                        "})()";
+                    break;
+                case "stream":
+                    // the function is asynchronous, wrapped in a promise.
+                    // global stdin variable will have a on("data") and on("end") event listeners
+                    // and global stdout will have a write() function.
+                    // the function is considered complete when resolve(number) or reject(error) is called.
+                    break;
+                case "iterable":
+                    // the function is asynchronous, wrapped in an async generator.
+                    // global stdin is async iterable or can also be used with the on("data") and on("end")
+                    // listeners (but not both in the same function) and yielding a value will write to stdout.
+                    // the function is considered complete when the async generator throws or returns,
+                    // the final yielded value will be used as the exit code if it is integral, otherwise 0 is used
+                    break;
+                default:
+                    break;
+                }
+
+                if (status === undefined) {
+                    throw new Error("No status");
+                }
+
+                try {
+                    runInNewContext(jscode, ctx);
 
                     all.push({
                         stdout: stdout,
-                        stdin: undefined,
-                        promise: Promise.resolve(0)
+                        stdin: stdin,
+                        promise: status
                     });
+                } catch (e) {
+                    console.error("JS error", e);
                 }
             }
         }
@@ -451,13 +563,12 @@ export async function runSeparators(cmds: any, source: string): Promise<number |
     return rp;
 }
 
-type WriteFinalFunction = () => void;
 type WriteCallbackFunction = (err: any) => void;
 
 class SubshellReader extends Duplex
 {
     private _paused: boolean;
-    private _buffers: { buf: Buffer | null, callback: WriteCallbackFunction | WriteFinalFunction }[];
+    private _buffers: { buf: Buffer | null, callback: WriteCallbackFunction | VoidFunction }[];
 
     constructor() {
         super();
@@ -491,7 +602,7 @@ class SubshellReader extends Duplex
         }
     }
 
-    _final(callback: WriteFinalFunction) {
+    _final(callback: VoidFunction) {
         if (this._paused) {
             this._buffers.push({ buf: null, callback: callback });
         } else {
@@ -500,9 +611,9 @@ class SubshellReader extends Duplex
         }
     }
 
-    _callCallback(data: { buf: Buffer | null, callback: WriteCallbackFunction | WriteFinalFunction }) {
+    _callCallback(data: { buf: Buffer | null, callback: WriteCallbackFunction | VoidFunction }) {
         if (data.buf === null) {
-            (data.callback as WriteFinalFunction)();
+            (data.callback as VoidFunction)();
         } else {
             (data.callback as WriteCallbackFunction)(null);
         }
@@ -514,49 +625,98 @@ type WriteResolveFunction = (value?: IteratorResult<Buffer | undefined> | Promis
 class SubshellWriter extends Writable
 {
     private _buffers: { buf: Buffer, callback: WriteCallbackFunction }[];
-    private _finalcb: WriteFinalFunction | undefined;
-    private _paused: boolean;
+    private _finalcb: { callback: VoidFunction | undefined };
+    private _resolver: { resolver: WriteResolveFunction | undefined };
+    private _started: boolean;
+    private _emitting: boolean;
 
     constructor() {
         super();
 
-        this._paused = true;
+        this._emitting = false;
+        this._started = false;
         this._buffers = [];
+        this._finalcb = { callback: undefined };
+        this._resolver = { resolver: undefined };
 
         this.once("newListener", event => {
             if (event === "data") {
+                if (this._started) {
+                    throw new Error("Can only have on data listener / iterate once for a given stream");
+                }
+                this._started = true;
+
                 process.nextTick(() => {
-                    this._paused = false;
+                    this._emitting = true;
                     for (const buf of this._buffers) {
                         buf.callback(null);
                         this.emit("data", buf.buf);
                     }
                     this._buffers = [];
-                    if (this._finalcb) {
-                        this._finalcb();
+                    if (this._finalcb.callback) {
+                        this._finalcb.callback();
                         this.emit("end");
-                        this._finalcb = undefined;
+                        this._finalcb.callback = undefined;
                     }
                 });
             }
         });
     }
 
-    _write(buf: Buffer, encoding: string, callback: (err: any) => void) {
-        if (this._paused) {
-            this._buffers.push({ buf: buf, callback: callback });
-        } else {
-            callback(null);
-            this.emit("data", buf);
+    [Symbol.asyncIterator]() {
+        if (this._started) {
+            throw new Error("Can only have on data listener / iterate once for a given stream");
+        }
+        this._started = true;
+
+        return {
+            _buffers: this._buffers,
+            _finalcb: this._finalcb,
+            _resolver: this._resolver,
+            next(): Promise<IteratorResult<Buffer | undefined>> {
+                return new Promise((resolve, reject) => {
+                    if (this._buffers.length > 0) {
+                        const buf = this._buffers.shift();
+                        if (buf === undefined) {
+                            throw new Error("Can't happen");
+                        }
+                        buf.callback(null);
+                        resolve({ done: false, value: buf.buf });
+                    } else if (this._finalcb.callback) {
+                        this._finalcb.callback();
+                        this._finalcb.callback = undefined;
+                        resolve({ done: true, value: undefined });
+                    } else {
+                        this._resolver.resolver = resolve;
+                    }
+                });
+            }
         }
     }
 
-    _final(callback: WriteFinalFunction) {
-        if (this._paused) {
-            this._finalcb = callback;
+    _write(buf: Buffer, encoding: string, callback: (err: any) => void) {
+        if (this._emitting) {
+            callback(null);
+            this.emit("data", buf);
+        } else if (this._resolver.resolver) {
+            callback(null);
+            this._resolver.resolver({ done: false, value: buf });
+            this._resolver.resolver = undefined;
         } else {
+            this._buffers.push({ buf: buf, callback: callback });
+        }
+    }
+
+    _final(callback: VoidFunction) {
+        if (this._emitting) {
             callback();
             this.emit("end");
+        } else if (this._resolver.resolver) {
+            callback();
+            this._resolver.resolver({ done: true, value: undefined });
+            this._resolver.resolver = undefined;
+        } else {
+            this._finalcb.callback = callback;
         }
     }
 }
