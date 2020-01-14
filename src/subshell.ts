@@ -71,8 +71,8 @@ async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<
 
 interface SubshellOptions
 {
-    readable?: SubshellReader;
-    writable?: SubshellWriter;
+    readable?: ShellReader;
+    writable?: ShellWriter;
 }
 
 class Pipe
@@ -98,7 +98,7 @@ class Pipe
         if (this._opts.writable) {
             const owritable = this._opts.writable;
             // fucking typescript
-            const ofirstSource = new SubshellReader();
+            const ofirstSource = new ShellReader();
             firstSource = ofirstSource;
             owritable.on("data", buf => {
                 ofirstSource.write(buf);
@@ -124,10 +124,10 @@ class Pipe
             case "subshell":
                 let subopts: SubshellOptions = {};
                 if (i < pnum - 1 || finalDestination !== undefined) {
-                    subopts.readable = new SubshellReader();
+                    subopts.readable = new ShellReader();
                 }
                 if (source !== undefined || i > 0) {
-                    subopts.writable = new SubshellWriter();
+                    subopts.writable = new ShellWriter();
                 }
                 all.push({
                     stdout: subopts.readable,
@@ -177,7 +177,7 @@ class Pipe
                     // stdin is a buffer that contains all data from the previous process in the pipe chain (if any).
                     // the exit code is the integral value returned or 0 if none.
 
-                    const jstdout = new SubshellReader()
+                    const jstdout = new ShellReader()
 
                     // we need to replace jscode with code that waits until all the data from the previous entry has been read
                     ctx.runInNewContext = runInNewContext;
@@ -188,7 +188,7 @@ class Pipe
                         },
                         error: console.error.bind(console)
                     };
-                    ctx.stdout = new SubshellWriter();
+                    ctx.stdout = new ShellWriter();
                     ctx.stdout.on("data", buf => {
                         jstdout.write(buf);
                     });
@@ -202,11 +202,11 @@ class Pipe
                         jstdout.pipe(process.stdout);
                     }
 
-                    const jstdin = new SubshellWriter();
-                    ctx.stdin = new SubshellReader();
+                    const jstdin = new ShellWriter();
+                    ctx.stdin = new ShellReader();
 
                     (async function() {
-                        const ctxin = ctx.stdin as SubshellReader;
+                        const ctxin = ctx.stdin as ShellReader;
                         for await (const buf of jstdin) {
                             ctxin.write(buf);
                         }
@@ -455,8 +455,8 @@ async function subshell(cmds: any, source: string, opts: SubshellOptions): Promi
         subopts = opts;
     } else if (cmds.type === "subshellOut") {
         subopts = {
-            readable: new SubshellReader(),
-            writable: new SubshellWriter()
+            readable: new ShellReader(),
+            writable: new ShellWriter()
         }
     } else {
         throw new Error(`Invalid subshell type: ${cmds.type}`);
@@ -505,8 +505,8 @@ export async function runSubshell(cmds: any, source: string): Promise<SubshellRe
     try {
         switch (cmds.type) {
             case "subshellOut":
-                opts.readable = new SubshellReader(),
-                opts.writable = new SubshellWriter();
+                opts.readable = new ShellReader(),
+                opts.writable = new ShellWriter();
                 // fall through
             case "subshell":
                 seps = new CommandSeparators(cmds.subshell.sep, source, opts);
@@ -565,7 +565,7 @@ export async function runSeparators(cmds: any, source: string): Promise<number |
 
 type WriteCallbackFunction = (err: any) => void;
 
-class SubshellReader extends Duplex
+class ShellReader extends Duplex
 {
     private _paused: boolean;
     private _buffers: { buf: Buffer | null, callback: WriteCallbackFunction | VoidFunction }[];
@@ -622,7 +622,7 @@ class SubshellReader extends Duplex
 
 type WriteResolveFunction = (value?: IteratorResult<Buffer | undefined> | PromiseLike<IteratorResult<Buffer | undefined>>) => void;
 
-class SubshellWriter extends Writable
+class ShellWriter extends Writable
 {
     private _buffers: { buf: Buffer, callback: WriteCallbackFunction }[];
     private _finalcb: { callback: VoidFunction | undefined };
