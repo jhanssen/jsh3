@@ -264,6 +264,8 @@ function visitJS(node: any, line: string) {
 function visitSep(node: any, line: string) {
     runSeparators(node, line).then(arg => {
         console.log("done sep", arg);
+    }).catch(e => {
+        console.error(e);
     });
 }
 
