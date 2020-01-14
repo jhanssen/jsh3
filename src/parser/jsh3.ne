@@ -55,11 +55,12 @@ const lexer = moo.states({
         dollarvariableend: { match: "}", pop: true }
     },
     jstype: {
+        jstypecaptureout: "$",
         jstypestream: { match: "#", next: "js" },
         jstypeiterable: { match: "*", next: "js" },
         jstypereturn: { match: "^", next: "js" },
         jstypestring: { match: ":", next: "jstypestring" },
-        jscode: { match: /[^#*^:]/, next: "js", lineBreaks: true }
+        jscode: { match: /[^$#*^:]/, next: "js", lineBreaks: true }
     },
     jstypestring: {
         jstypestringcontent: { match: /[^\s]+/, next: "js" }
@@ -154,8 +155,8 @@ jsdoubleblock -> %jsdoubleesc
 jsbackblock -> jsblock
              | %jsbackesc
              | %jsbackcontent
-jstype -> %jstypestream | %jstypeiterable | %jstypereturn | (%jstypestring %jstypestringcontent)
-jstypeblock -> %jsstart jstype:? _ (jspart):* _ %jsend
+jstype -> %jstypecaptureout:? (%jstypestream | %jstypeiterable | %jstypereturn | (%jstypestring %jstypestringcontent)):?
+jstypeblock -> %jsstart jstype _ (jspart):* _ %jsend
 jsblock -> %jsstart _ (jspart):* _ %jsend
 jspart -> jsblock
         | %jscode
@@ -236,29 +237,33 @@ function extractJSCode(d: any) {
     }
 
     let jstype = "return";
+    let capture = "exit";
     let start = d[0][0].offset;
     if (d[0][1] instanceof Array && d[0][1].length > 0) {
-        if ("type" in d[0][1][0]) {
-            jstype = d[0][1][0].type.substr(6); // skip 'jstype'
+        if (d[0][1][0] !== null && d[0][1][0].type === "jstypecaptureout") {
+            capture = "out";
             start = d[0][1][0].offset + d[0][1][0].text.length - 1;
-        } else if ("type" in d[0][1][0][0] && d[0][1][0][0].type === "jstypestring" && d[0][1][0].length === 2) {
-            jstype = d[0][1][0][1].value.toString();
-            start = d[0][1][0][1].offset + d[0][1][0][1].text.length - 1;
-        } else {
-            throw new Error("Couldn't find jstype");
+        }
+        if (d[0][1][1] !== null && d[0][1][1][0] !== null) {
+            if ("type" in d[0][1][1][0]) {
+                jstype = d[0][1][1][0].type.substr(6); // skip 'jstype'
+                start = d[0][1][1][0].offset + d[0][1][1][0].text.length - 1;
+            } else if ("type" in d[0][1][1][0][0] && d[0][1][1][0][0].type === "jstypestring" && d[0][1][1][0].length === 2) {
+                jstype = d[0][1][1][0][1].value.toString();
+                start = d[0][1][1][0][1].offset + d[0][1][1][0][1].text.length - 1;
+            } else {
+                throw new Error("Couldn't find jstype");
+            }
         }
     }
 
     return { type: "jscode",
              jstype: jstype,
+             capture: capture,
              start: start,
              end: d[0][5].offset,
              args: args.length > 0 ? args : undefined
            };
-}
-
-function extractJSCodeArray(d: any) {
-    return [extractJSCode(d)];
 }
 
 function extractElIf(d: any) {
