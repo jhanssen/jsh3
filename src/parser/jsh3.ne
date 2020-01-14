@@ -30,7 +30,7 @@ const lexer = moo.states({
         semi: ";",
         pipe: "|",
         star: "*",
-        jsstart: { match: "{", push: "js" },
+        jsstart: { match: "{", push: "jstype" },
         variable: { match: /\$[a-zA-Z0-9_]+/, value: (s: string) => s.slice(1) },
         keyword: [/if\b/, /else\b/, /elif\b/, /for\b/, /repeat\b/, /while\b/, /until\b/, /do\b/, /done\b/, /fi\b/, /true\b/, /false\b/],
         doublestringstart: { match: "\"", push: "doublestringstart" },
@@ -53,6 +53,15 @@ const lexer = moo.states({
     dollarvariable: {
         variable: { match: /[^}\n]+/ },
         dollarvariableend: { match: "}", pop: true }
+    },
+    jstype: {
+        jstypestream: { match: "#", next: "js" },
+        jstypereturn: { match: "*", next: "js" },
+        jstypestring: { match: ":", next: "jstypestring" },
+        jscode: { match: /[^#*:]/, next: "js", lineBreaks: true }
+    },
+    jstypestring: {
+        jstypestringcontent: { match: /[^\s]+/, next: "js" }
     },
     js: {
         jssinglestart: { match: "'", push: "jssinglestart" },
@@ -135,15 +144,17 @@ conditions -> subconditions {% extractConditions %}
 subconditions -> condition (_ compare _ condition):? (__ logical __ subconditions):?
 subshell -> %lparen _ cmds _ %rparen redir {% extractSubshell %}
 subshellout -> %dollarlparen _ cmds _ %rparen {% extractSubshellOut %}
-js -> jsblock (%lparen argnojs (_ %comma _ argnojs):* %rparen):? {% extractJSCode %}
+js -> jstypeblock (%lparen argnojs (_ %comma _ argnojs):* %rparen):? {% extractJSCode %}
 
 jssingleblock -> %jssingleesc
                | %jssinglecontent
 jsdoubleblock -> %jsdoubleesc
                | %jsdoublecontent
-jsbackblock -> js
+jsbackblock -> jsblock
              | %jsbackesc
              | %jsbackcontent
+jstype -> %jstypestream | %jstypereturn | (%jstypestring %jstypestringcontent)
+jstypeblock -> %jsstart jstype:? _ (jspart):* _ %jsend
 jsblock -> %jsstart _ (jspart):* _ %jsend
 jspart -> jsblock
         | %jscode
@@ -182,7 +193,7 @@ arg -> %identifier
      | %integer
      | singlestring
      | doublestring
-     | jsblock
+     | js
      | subshell
      | subshellout
      | %variable
@@ -210,7 +221,7 @@ function extractJSCode(d: any) {
     if (d[0][0].type !== "jsstart") {
         throw new Error("can't find jsstart");
     }
-    if (d[0][4].type !== "jsend") {
+    if (d[0][5].type !== "jsend") {
         throw new Error("can't find jsend");
     }
     const args = [];
@@ -222,11 +233,31 @@ function extractJSCode(d: any) {
             }
         }
     }
+
+    let jstype = "return";
+    let start = d[0][0].offset;
+    if (d[0][1] instanceof Array && d[0][1].length > 0) {
+        if ("type" in d[0][1][0]) {
+            jstype = d[0][1][0].type.substr(6); // skip 'jstype'
+            start = d[0][1][0].offset + d[0][1][0].text.length - 1;
+        } else if ("type" in d[0][1][0][0] && d[0][1][0][0].type === "jstypestring" && d[0][1][0].length === 2) {
+            jstype = d[0][1][0][1].value.toString();
+            start = d[0][1][0][1].offset + d[0][1][0][1].text.length - 1;
+        } else {
+            throw new Error("Couldn't find jstype");
+        }
+    }
+
     return { type: "jscode",
-             start: d[0][0].offset,
-             end: d[0][4].offset,
+             jstype: jstype,
+             start: start,
+             end: d[0][5].offset,
              args: args.length > 0 ? args : undefined
            };
+}
+
+function extractJSCodeArray(d: any) {
+    return [extractJSCode(d)];
 }
 
 function extractElIf(d: any) {
