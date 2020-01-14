@@ -345,10 +345,14 @@ Readline.readHistory(pathJoin(homedir(), ".jsh_history")).then(() => {
 });
 Process.start();
 
-process.on('SIGINT', () => {
+process.on("SIGINT", () => {
     Readline.clear();
 });
 
-process.on('uncaughtException', err => {
-    Readline.log.error(err);
+process.on("uncaughtException", err => {
+    console.error("Uncaught exception", err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+    console.error("Unhandled rejection at", promise, "reason", reason);
 });
