@@ -153,10 +153,12 @@ class Pipe
                         promise: Promise.resolve(ret)
                     });
                 } else {
-                    // ### should make a stdout stream with ret here
-                    console.log(ret);
+                    const stdout = new Readable();
+                    stdout.push(Buffer.from(ret));
+                    stdout.push(null);
+
                     all.push({
-                        stdout: undefined,
+                        stdout: stdout,
                         stdin: undefined,
                         promise: Promise.resolve(0)
                     });

@@ -19,6 +19,7 @@
   "exclude": [
     "native",
     "node_modules",
-    "mvdan-sh"
+    "mvdan-sh",
+    "tests"
   ]
 }
