@@ -224,7 +224,8 @@ class Pipe
                         ctx.reject = reject;
                     });
 
-                    const oldjscode = jscode.replace(/"/g, '\\"');
+                    // this is pretty weird
+                    const oldjscode = jscode.replace(/"/g, '\\"').replace(/\\n/g, "\\\\n");
                     jscode =
                         "(async function() {\n" +
                         "    let buf = undefined;\n" +
@@ -237,10 +238,16 @@ class Pipe
                         "        stdin: buf,\n" +
                         "        console: console\n" +
                         "    }\n" +
-                        `    const ret = runInNewContext("${oldjscode}", nctx);\n` +
+                        "    try {\n" +
+                        `        const jscode = "${oldjscode}";\n` +
+                        "        //console.log('jscode', jscode);\n" +
+                        "        const ret = runInNewContext(jscode, nctx);\n" +
+                        "        if (typeof ret === 'number') { resolve(ret); }\n" +
+                        "        else { if (ret !== undefined) console.log(ret); resolve(0); }\n" +
+                        "    } catch (e) {\n" +
+                        "        reject(e);\n" +
+                        "    }\n" +
                         "    stdout.end();\n" +
-                        "    if (typeof ret === 'number') { resolve(ret); }\n" +
-                        "    else { console.log(ret); resolve(0); }\n" +
                         "})()";
                     break;
                 case "stream":
