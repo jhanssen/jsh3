@@ -76,7 +76,7 @@ const lexer = moo.states({
     jssinglestart: {
         jssingleesc: /\\./,
         jssingleend: { match: "'", pop: true },
-        jssinglecontent: { match: /[^'\\]+/, lineBreaks: true }
+        jssinglecontent: { match: /[^'\\\n]+/, lineBreaks: true }
     },
     jsdoublestart: {
         jsdoubleesc: /\\./,
