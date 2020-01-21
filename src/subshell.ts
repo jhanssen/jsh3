@@ -716,7 +716,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                         let status = undefined;
                         const writeStatus = () => {
                             if (status !== undefined) {
-                                stdout.write(status.toString());
+                                stdout.write(status + "\\n");
                                 status = undefined;
                             }
                         };
@@ -724,9 +724,10 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                             switch (typeof out) {
                             case "string":
                                 writeStatus();
-                                stdout.write(out);
+                                stdout.write(out + "\\n");
                                 break;
                             case "number":
+                                writeStatus();
                                 status = out;
                                 break;
                             case "object":
