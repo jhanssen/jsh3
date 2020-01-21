@@ -12,13 +12,13 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 
-struct AsyncPromise
+struct AsyncFunction
 {
-    AsyncPromise(Napi::Promise::Deferred&& d, Napi::AsyncContext&& c)
-        : promise(std::move(d)), ctx(std::move(c))
+    AsyncFunction(Napi::FunctionReference&& f, Napi::AsyncContext&& c)
+        : function(std::move(f)), ctx(std::move(c))
     {
     }
-    Napi::Promise::Deferred promise;
+    Napi::FunctionReference function;
     Napi::AsyncContext ctx;
 };
 
@@ -79,7 +79,7 @@ struct Process
     bool needsWrite { false };
     bool pendingClose { false };
 
-    std::unique_ptr<AsyncPromise> promise;
+    std::unique_ptr<AsyncFunction> callback;
 
     struct Writer
     {
@@ -100,7 +100,7 @@ struct Reader
     Mutex mutex;
     uv_thread_t thread;
     std::vector<std::shared_ptr<BufferEmitter> > pendingemitters;
-    std::vector<std::shared_ptr<Process> > newprocs, procs, doneprocs;
+    std::vector<std::shared_ptr<Process> > newprocs, procs, exitedprocs, stoppedprocs;
     int sigpipe[2];
     int wakeuppipe[2];
     bool stopped { true };
@@ -234,11 +234,12 @@ void Reader::start(const Napi::Env& env)
 
     uv_async_init(uv_default_loop(), &async,
                   [](uv_async_t*) {
-                      std::vector<std::shared_ptr<Process> > dp;
+                      std::vector<std::shared_ptr<Process> > ep, sp;
                       std::vector<std::shared_ptr<BufferEmitter> > pe;
                       {
                           MutexLocker locker(&reader.mutex);
-                          std::swap(dp, reader.doneprocs);
+                          std::swap(ep, reader.exitedprocs);
+                          std::swap(sp, reader.stoppedprocs);
                           std::swap(pe, reader.pendingemitters);
                       }
                       for (const auto& e : pe) {
@@ -262,12 +263,19 @@ void Reader::start(const Napi::Env& env)
                               }
                           }
                       }
-                      for (const auto& p : dp) {
-                          auto env = p->promise->promise.Env();
+                      for (const auto& p : sp) {
+                          auto env = p->callback->ctx.Env();
                           Napi::HandleScope scope(env);
-                          Napi::CallbackScope callback(env, p->promise->ctx);
+                          Napi::CallbackScope callback(env, p->callback->ctx);
 
-                          p->promise->promise.Resolve(Napi::Number::New(env, p->status));
+                          p->callback->function.Call({ Napi::String::New(env, "stopped") });
+                      }
+                      for (const auto& p : ep) {
+                          auto env = p->callback->ctx.Env();
+                          Napi::HandleScope scope(env);
+                          Napi::CallbackScope callback(env, p->callback->ctx);
+
+                          p->callback->function.Call({ Napi::String::New(env, "exited"), Napi::Number::New(env, p->status) });
                       }
                   });
 
@@ -380,7 +388,7 @@ void Reader::start(const Napi::Env& env)
                                          if (!proc->running && proc->stdout == -1 && proc->stderr == -1) {
                                              // notify js
                                              MutexLocker locker(&reader->mutex);
-                                             reader->doneprocs.push_back(proc);
+                                             reader->exitedprocs.push_back(proc);
                                          }
                                          uv_async_send(&reader->async);
                                      }
@@ -391,7 +399,7 @@ void Reader::start(const Napi::Env& env)
                                          if (!proc->running && proc->stdout == -1 && proc->stderr == -1) {
                                              // notify js
                                              MutexLocker locker(&reader->mutex);
-                                             reader->doneprocs.push_back(proc);
+                                             reader->exitedprocs.push_back(proc);
                                          }
                                          uv_async_send(&reader->async);
                                      }
@@ -439,13 +447,20 @@ void Reader::handleSigChld()
     for (const auto& proc : procs) {
         EINTRWRAP(w, waitpid(proc->pid, &status, WNOHANG | WUNTRACED));
         if (w > 0) {
-            proc->running = false;
-            proc->status = status;
-            if (proc->stdout == -1 && proc->stderr == -1) {
-                // all done, notify js
+            if (WIFSTOPPED(status)) {
+                // process suspended, notify js
                 MutexLocker locker(&mutex);
-                doneprocs.push_back(proc);
+                stoppedprocs.push_back(proc);
                 uv_async_send(&async);
+            } else {
+                proc->running = false;
+                proc->status = status;
+                if (proc->stdout == -1 && proc->stderr == -1) {
+                    // all done, notify js
+                    MutexLocker locker(&mutex);
+                    exitedprocs.push_back(proc);
+                    uv_async_send(&async);
+                }
             }
         }
     }
@@ -557,9 +572,6 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
     // we'll need to notify the parent if we can't exec,
     // create a pipe with CLOEXEC and write to it if
     // we fail
-
-    proc->promise = std::make_unique<AsyncPromise>(Napi::Promise::Deferred::New(env), Napi::AsyncContext(env, "process"));
-    auto promise = proc->promise->promise.Promise();
 
     int runpipe[2];
     ::pipe(runpipe);
@@ -704,7 +716,11 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
                 EINTRWRAP(e, ::close(stderrpipe[0]));
             }
 
-            proc->promise->promise.Reject(Napi::String::New(env, "Failed to launch process"));
+            auto env = proc->callback->ctx.Env();
+            Napi::HandleScope scope(env);
+            Napi::CallbackScope callback(env, proc->callback->ctx);
+
+            proc->callback->function.Call({ Napi::String::New(env, "error"), Napi::String::New(env, "Failed to launch process") });
             proc.reset();
         } else {
             // add this process to our read list
@@ -764,7 +780,6 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
         obj.Set("write", Napi::Function::New(env, Write));
         obj.Set("close", Napi::Function::New(env, Close));
         obj.Set("pid", Napi::Number::New(env, pid));
-        obj.Set("promise", promise);
 
         return obj;
     } else {
@@ -799,29 +814,38 @@ Napi::Value Launch(const Napi::CallbackInfo& info)
     if (info[1].IsArray()) {
         std::vector<std::string> args;
         const auto array = info[1].As<Napi::Array>();
+        args.reserve(array.Length());
         for (size_t i = 0; i < array.Length(); ++i) {
             args.push_back(array.Get(i).As<Napi::String>().Utf8Value());
         }
         proc->args = std::move(args);
     }
+
     if (info[2].IsObject()) {
-        std::vector<std::pair<std::string, std::string> > env;
-        const auto obj = info[2].As<Napi::Object>();
+        std::vector<std::pair<std::string, std::string> > envs;
+        auto obj = info[2].As<Napi::Object>();
         const auto props = obj.GetPropertyNames();
+        envs.reserve(props.Length());
         for (size_t i = 0; i < props.Length(); ++i) {
             const auto k = props.Get(i);
             const auto v = obj.Get(k);
             if (!v.IsUndefined()) {
-                env.push_back(std::make_pair(k.As<Napi::String>().Utf8Value(), v.As<Napi::String>().Utf8Value()));
+                envs.push_back(std::make_pair(k.As<Napi::String>().Utf8Value(), v.As<Napi::String>().Utf8Value()));
             }
         }
-        proc->env = std::move(env);
+        proc->env = std::move(envs);
     }
+
+    if (!info[3].IsFunction()) {
+        throw Napi::TypeError::New(env, "Fourth argument needs to be a status callback function");
+    }
+    proc->callback = std::make_unique<AsyncFunction>(Napi::Persistent(info[3].As<Napi::Function>()), Napi::AsyncContext(env, "process"));
+
     ProcessOptions opts = {
         true, true, true, false, false, -1
     };
-    if (info[3].IsObject()) {
-        const auto obj = info[3].As<Napi::Object>();
+    if (info[4].IsObject()) {
+        auto obj = info[4].As<Napi::Object>();
         opts.redirectStdin = obj.Get("redirectStdin").As<Napi::Boolean>().Value();
         opts.redirectStdout = obj.Get("redirectStdout").As<Napi::Boolean>().Value();
         opts.redirectStderr = obj.Get("redirectStderr").As<Napi::Boolean>().Value();

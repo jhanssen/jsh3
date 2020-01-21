@@ -1,4 +1,4 @@
-import { ReadProcess, Process, ProcessOptions } from "./process";
+import { ReadProcess, Process, ProcessOptions, StatusResolveFunction, RejectFunction } from "./process";
 import { Readable, Writable, Duplex } from "stream";
 import { pathify } from "./utils";
 import { expand } from "./expand";
@@ -8,8 +8,6 @@ import { runInNewContext } from "vm";
 import { format as consoleFormat } from "util";
 
 type VoidFunction = () => void;
-type StatusResolveFunction = (value?: number | undefined | PromiseLike<number | undefined>) => void;
-type RejectFunction = (reason?: any) => void;
 
 interface CmdResult
 {

@@ -1,13 +1,14 @@
 export interface InCtx {}
 export interface OutCtx {}
 
+export type StatusOn = "exited" | "stopped" | "error";
+
 export interface Launch
 {
-    promise: Promise<number>;
     pid: number;
-    write:(ctx: InCtx, buffer?: Buffer) => void;
-    close:(ctx: InCtx) => void;
-    listen:(ctx: OutCtx, listener: (buffer: Buffer) => void) => void;
+    write: (ctx: InCtx, buffer?: Buffer) => void;
+    close: (ctx: InCtx) => void;
+    listen: (ctx: OutCtx, listener: (buffer: Buffer) => void) => void;
     stdoutCtx?: OutCtx;
     stderrCtx?: OutCtx;
     stdinCtx?: InCtx;
@@ -30,7 +31,13 @@ declare namespace Native
     export function stop(): void;
     export function uid(name?: string): number;
     export function gids(name?: string): number[];
-    export function launch(cmd: string, args?: string[], env?: {[key: string]: string | undefined}, opts?: Options): Launch;
+    export function launch(
+        cmd: string,
+        args: string[] | undefined,
+        env: {[key: string]: string | undefined} | undefined,
+        callback: (type: StatusOn, status?: number | string) => void,
+        opts?: Options
+    ): Launch;
 }
 
 export default Native;

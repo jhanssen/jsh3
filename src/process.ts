@@ -3,10 +3,14 @@ import {
     Launch as NativeProcessLaunch,
     InCtx as NativeProcessIn,
     OutCtx as NativeProcessOut,
-    Options as NativeProcessOptions
+    Options as NativeProcessOptions,
+    StatusOn as NativeProcessStatusOn
 } from "../native/process";
 
 import { Readable, Writable } from "stream";
+
+export type StatusResolveFunction = (value?: number | undefined | PromiseLike<number | undefined>) => void;
+export type RejectFunction = (reason?: any) => void;
 
 class ProcessWriter extends Writable
 {
@@ -40,7 +44,7 @@ class ProcessReader extends Readable
     private _paused: boolean;
     private _buffers: BufferOrNull[];
 
-    constructor(ctx: NativeProcessOut, launch: NativeProcessLaunch) {
+    constructor(ctx: NativeProcessOut, launch: NativeProcessLaunch, promise: Promise<number | undefined>) {
         super();
 
         this._paused = true;
@@ -55,7 +59,7 @@ class ProcessReader extends Readable
                 }
             }
         });
-        launch.promise.then(() => {
+        promise.then(() => {
             if (this._paused) {
                 this._buffers.push(null);
             } else {
@@ -85,25 +89,45 @@ class ProcessReader extends Readable
 export class Process
 {
     private _launch: NativeProcessLaunch;
+    private _status: Promise<number | undefined>;
+    private _statusResolve: StatusResolveFunction | undefined;
+    private _statusReject: RejectFunction | undefined;
 
     constructor(cmd: string, args?: string[], env?: {[key: string]: string | undefined}, opts?: NativeProcessOptions) {
-        this._launch = NativeProcess.launch(cmd, args, env, opts);
+        this._status = new Promise<number | undefined>((resolve, reject) => {
+            this._statusResolve = resolve;
+            this._statusReject = reject;
+        });
+        this._launch = NativeProcess.launch(cmd, args, env, (type: NativeProcessStatusOn, status?: number | string) => {
+            switch (type) {
+            case "error":
+                if (this._statusReject) {
+                    this._statusReject(status);
+                }
+                break;
+            case "exited":
+                if (this._statusResolve) {
+                    this._statusResolve(status as number);
+                    break;
+                }
+            }
+        }, opts);
     }
 
     get status() {
-        return this._launch.promise;
+        return this._status;
     }
 
     get stdout() {
         if (this._launch.stdoutCtx) {
-            return new ProcessReader(this._launch.stdoutCtx, this._launch);
+            return new ProcessReader(this._launch.stdoutCtx, this._launch, this._status);
         }
         throw new Error("Invalid process");
     }
 
     get stderr() {
         if (this._launch.stderrCtx) {
-            return new ProcessReader(this._launch.stderrCtx, this._launch);
+            return new ProcessReader(this._launch.stderrCtx, this._launch, this._status);
         }
         throw new Error("Invalid process");
     }
@@ -142,26 +166,32 @@ export interface ReadProcess {
 
 export function readProcess(cmd: string, args?: string[], env?: {[key: string]: string}): Promise<ReadProcess> {
     return new Promise((resolve, reject) => {
-        const launch = NativeProcess.launch(cmd, args, env);
         const read: ReadProcess = {
             status: 0,
             stdout: undefined,
             stderr: undefined
         };
+        const launch = NativeProcess.launch(cmd, args, env, (type: NativeProcessStatusOn, status?: number | string) => {
+            switch (type) {
+            case "error":
+                reject(status);
+                break;
+            case "exited":
+                if (typeof status !== "number") {
+                    throw new Error("Status of exited must be a number");
+                }
+                read.status = status;
+                if (stdout.length > 0) {
+                    read.stdout = Buffer.concat(stdout);
+                }
+                if (stderr.length > 0) {
+                    read.stderr = Buffer.concat(stderr);
+                }
+                resolve(read);
+                break;
+            }});
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
-        launch.promise.then(status => {
-            read.status = status;
-            if (stdout.length > 0) {
-                read.stdout = Buffer.concat(stdout);
-            }
-            if (stderr.length > 0) {
-                read.stderr = Buffer.concat(stderr);
-            }
-            resolve(read);
-        }).catch(e => {
-            reject(e);
-        });
         if (launch.stdinCtx) {
             launch.close(launch.stdinCtx);
         }
