@@ -758,11 +758,8 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
             break;
     }
 
-    if (jswrap === undefined) {
-        throw new Error("No wrapped js code");
-    }
-    if (status === undefined) {
-        throw new Error("No status");
+    if (jswrap === undefined || status === undefined) {
+        throw new Error("Unable to wrap JS code");
     }
 
     try {
