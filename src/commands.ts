@@ -1,7 +1,8 @@
 import { default as Readline } from "../native/readline";
 import { default as Process } from "../native/process";
+import { EnvType } from "./variable";
 
-async function exitcmd(args: string[], env: {[key: string]: string | undefined}) {
+async function exitcmd(args: string[], env: EnvType) {
     Process.stop();
     Readline.stop();
     process.exit();
@@ -9,7 +10,7 @@ async function exitcmd(args: string[], env: {[key: string]: string | undefined})
     return 0;
 }
 
-async function exportcmd(args: string[], env: {[key: string]: string | undefined}) {
+async function exportcmd(args: string[], env: EnvType) {
     if (args.length < 2) {
         throw new Error("export needs at least two arguments");
     }
@@ -17,7 +18,15 @@ async function exportcmd(args: string[], env: {[key: string]: string | undefined
     return 0;
 }
 
+async function env(args: string[], env: EnvType) {
+    for (const [k, v] of Object.entries(env)) {
+        console.log(`${k}=${v}`);
+    }
+    return 0;
+}
+
 export const commands = {
+    env: env,
     exit: exitcmd,
     export: exportcmd
 };

@@ -2,7 +2,7 @@ import { ReadProcess, Process, ProcessOptions } from "./process";
 import { Readable, Writable, Duplex } from "stream";
 import { pathify } from "./utils";
 import { expand } from "./expand";
-import { env as envGet, push as envPush, pop as envPop } from "./variable";
+import { env as envGet, push as envPush, pop as envPop, EnvType } from "./variable";
 import { commands as internalCommands } from "./commands";
 import { runInNewContext } from "vm";
 import { format as consoleFormat } from "util";
@@ -453,6 +453,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
         stdin: Buffer | Readable | undefined
         resolve: StatusResolveFunction | undefined,
         reject: RejectFunction | undefined,
+        env: EnvType,
         Buffer: typeof Buffer
     } = {
         args: args || [],
@@ -463,6 +464,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
         stdin: undefined,
         resolve: undefined,
         reject: undefined,
+        env: envGet(),
         Buffer: Buffer
     };
 
@@ -534,6 +536,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                     }
                     const nctx = {
                         args: args,
+                        env: env,
                         stdin: buf,
                         console: console,
                         Buffer: Buffer
@@ -620,6 +623,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                         const promise = new Promise((newResolve, newReject) => {
                             const nctx = {
                                 args: args,
+                                env: env,
                                 stdin: stdin,
                                 stdout: stdout,
                                 stderr: stderr,
@@ -709,6 +713,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                         const jscode = "(async function* () { ${jscode} })()";
                         const nctx = {
                             args: args,
+                            env: env,
                             stdin: stdin,
                             stdout: stdout,
                             stderr: stderr,

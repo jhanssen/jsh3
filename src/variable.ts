@@ -1,4 +1,4 @@
-type EnvType = typeof process.env;
+export type EnvType = typeof process.env;
 
 const envs: EnvType[] = [
     Object.assign({}, process.env)
