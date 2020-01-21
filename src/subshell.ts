@@ -535,7 +535,8 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                     const nctx = {
                         args: args,
                         stdin: buf,
-                        console: console
+                        console: console,
+                        Buffer: Buffer
                     };
                     try {
                         const jscode = "${jscode}";
@@ -624,7 +625,8 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                                 stderr: stderr,
                                 console: console,
                                 resolve: newResolve,
-                                reject: newReject
+                                reject: newReject,
+                                Buffer: Buffer
                             };
                             runInNewContext(jscode, nctx);
                         });
@@ -710,7 +712,8 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                             stdin: stdin,
                             stdout: stdout,
                             stderr: stderr,
-                            console: console
+                            console: console,
+                            Buffer: Buffer
                         };
                         const generator = runInNewContext(jscode, nctx);
                         let status = undefined;
