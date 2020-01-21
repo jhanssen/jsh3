@@ -630,7 +630,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                         });
                         const status = await promise;
                         close();
-                        resolve(status);
+                        resolve(status || 0);
                     } catch (err) {
                         close();
                         reject(err);
@@ -743,7 +743,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                             }
                         }
                         close();
-                        resolve(status);
+                        resolve(status || 0);
                     } catch (err) {
                         close();
                         reject(err);
