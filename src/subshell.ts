@@ -623,12 +623,14 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                                 stdout: stdout,
                                 stderr: stderr,
                                 console: console,
-                                resolve: newReject,
+                                resolve: newResolve,
                                 reject: newReject
                             };
                             runInNewContext(jscode, nctx);
                         });
-                        promise.then(status => { close(); resolve(status); }).catch(err => { close(); reject(err); });
+                        const status = await promise;
+                        close();
+                        resolve(status);
                     } catch (err) {
                         close();
                         reject(err);
@@ -641,6 +643,112 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
             // listeners (but not both in the same function) and yielding a value will write to stdout.
             // the function is considered complete when the async generator throws or returns,
             // the final yielded value will be used as the exit code if it is integral, otherwise 0 is used
+
+            const jstdout = new ShellReader()
+
+            ctx.runInNewContext = runInNewContext;
+            ctx.console = {
+                log: (...args) => {
+                    const ret = consoleFormat(...args);
+                    jstdout.write(ret + "\n");
+                },
+                error: console.error.bind(console)
+            };
+            ctx.stdout = new ShellWriter();
+            ctx.stdout.on("data", buf => {
+                jstdout.write(buf);
+            });
+            ctx.stdout.on("end", () => {
+                jstdout.end();
+                (ctx.stdout as ShellWriter).removeAllListeners();
+            });
+            ctx.stderr = new ShellWriter();
+            ctx.stderr.on("data", buf => {
+                console.error(buf.toString());
+            });
+            ctx.stderr.on("end", () => {
+                (ctx.stderr as ShellWriter).removeAllListeners();
+            });
+
+            if (redirectStdout) {
+                stdout = jstdout;
+            } else {
+                jstdout.pipe(process.stdout);
+            }
+
+            const jstdin = new ShellWriter();
+            ctx.stdin = new ShellReader();
+
+            (async function() {
+                const ctxin = ctx.stdin as ShellReader;
+                for await (const buf of jstdin) {
+                    ctxin.write(buf);
+                }
+                ctxin.end();
+            })();
+
+            if (redirectStdin) {
+                stdin = jstdin;
+            } else {
+                jstdin.end();
+            }
+
+            status = new Promise<number | undefined>((resolve, reject) => {
+                ctx.resolve = resolve;
+                ctx.reject = reject;
+            });
+
+            jswrap = `
+                (async function() {
+                    const close = () => {
+                        stdout.end();
+                    };
+                    try {
+                        const jscode = "(async function* () { ${jscode} })()";
+                        const nctx = {
+                            args: args,
+                            stdin: stdin,
+                            stdout: stdout,
+                            stderr: stderr,
+                            console: console
+                        };
+                        const generator = runInNewContext(jscode, nctx);
+                        let status = undefined;
+                        const writeStatus = () => {
+                            if (status !== undefined) {
+                                stdout.write(status.toString());
+                                status = undefined;
+                            }
+                        };
+                        for await (const out of generator) {
+                            switch (typeof out) {
+                            case "string":
+                                writeStatus();
+                                stdout.write(out);
+                                break;
+                            case "number":
+                                status = out;
+                                break;
+                            case "object":
+                                if (out instanceof Buffer) {
+                                    writeStatus();
+                                    stdout.write(out);
+                                    break;
+                                }
+                                // fall through
+                            default:
+                                writeStatus();
+                                stdout.write(out.toString());
+                                break;
+                            }
+                        }
+                        close();
+                        resolve(status);
+                    } catch (err) {
+                        close();
+                        reject(err);
+                    }
+                })()`;
             break; }
         default:
             break;
