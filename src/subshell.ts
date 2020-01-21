@@ -433,7 +433,8 @@ export async function runSeparators(cmds: any, source: string): Promise<number |
 export { CmdResult as JSResult };
 
 export async function runJS(js: any, source: string, redirectStdin: boolean, redirectStdout: boolean): Promise<CmdResult> {
-    let jscode = source.substr(js.start + 1, js.end - js.start - 1);
+    const jscode = source.substr(js.start + 1, js.end - js.start - 1).replace(/"/g, '\\"').replace(/\\n/g, "\\\\n");
+    let jswrap: string | undefined;
     let args: string[] | undefined;
     if (js.args instanceof Array) {
         const ps: Promise<string>[] = [];
@@ -451,7 +452,8 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
         stderr: Writable | undefined,
         stdin: Buffer | Readable | undefined
         resolve: StatusResolveFunction | undefined,
-        reject: RejectFunction | undefined
+        reject: RejectFunction | undefined,
+        Buffer: typeof Buffer
     } = {
         args: args || [],
         runInNewContext: undefined,
@@ -460,7 +462,8 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
         stderr: undefined,
         stdin: undefined,
         resolve: undefined,
-        reject: undefined
+        reject: undefined,
+        Buffer: Buffer
     };
 
     let stdin: Writable | undefined;
@@ -468,7 +471,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
     let status: Promise<number | undefined> | undefined;
 
     switch (js.jstype) {
-        case "return":
+        case "return": {
             // the function is synchronous, whatever is console.logged goes to stdout
             // and if the function returns a non-integer value that also goes to stdout.
             // stdin is a buffer that contains all data from the previous process in the pipe chain (if any).
@@ -476,7 +479,6 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
 
             const jstdout = new ShellReader()
 
-            // we need to replace jscode with code that waits until all the data from the previous entry has been read
             ctx.runInNewContext = runInNewContext;
             ctx.console = {
                 log: (...args) => {
@@ -490,6 +492,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                 jstdout.write(buf);
             });
             ctx.stdout.on("end", () => {
+                (ctx.stdout as ShellWriter).removeAllListeners();
                 jstdout.end();
             });
 
@@ -522,54 +525,136 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
             });
 
             // this is pretty weird
-            const oldjscode = jscode.replace(/"/g, '\\"').replace(/\\n/g, "\\\\n");
-            jscode =
-                "(async function() {\n" +
-                "    let buf = undefined;\n" +
-                "    for await (const nbuf of stdin) {\n" +
-                "        if (buf === undefined) buf = nbuf;\n" +
-                "        else buf = Buffer.concat([buf, nbuf]);\n" +
-                "    }\n" +
-                "    const nctx = {\n" +
-                "        args: args,\n" +
-                "        stdin: buf,\n" +
-                "        console: console\n" +
-                "    }\n" +
-                "    try {\n" +
-                `        const jscode = "${oldjscode}";\n` +
-                "        //console.log('jscode', jscode);\n" +
-                "        const ret = runInNewContext(jscode, nctx);\n" +
-                "        if (typeof ret === 'number') { resolve(ret); }\n" +
-                "        else { if (ret !== undefined) console.log(ret); resolve(0); }\n" +
-                "    } catch (e) {\n" +
-                "        reject(e);\n" +
-                "    }\n" +
-                "    stdout.end();\n" +
-                "})()";
-            break;
-        case "stream":
+            jswrap = `
+                (async function() {
+                    let buf = undefined;
+                    for await (const nbuf of stdin) {
+                        if (buf === undefined) buf = nbuf;
+                        else buf = Buffer.concat([buf, nbuf]);
+                    }
+                    const nctx = {
+                        args: args,
+                        stdin: buf,
+                        console: console
+                    };
+                    try {
+                        const jscode = "${jscode}";
+                        // console.log('jscode', jscode, nctx.stdin);
+                        const ret = runInNewContext(jscode, nctx);
+                        if (typeof ret === 'number') { resolve(ret); }
+                        else { if (ret !== undefined) console.log(ret); resolve(0); }
+                    } catch (e) {
+                        reject(e);
+                    }
+                    stdout.end();
+                })()`;
+            break; }
+        case "stream": {
             // the function is asynchronous, wrapped in a promise.
-            // global stdin variable will have a on("data") and on("end") event listeners
-            // and global stdout will have a write() function.
+            // global stdin, stdout and stderr variables will be node streams.
+            // in addition, console.log() will go to stdout and console.error() to stderr.
             // the function is considered complete when resolve(number) or reject(error) is called.
-            break;
-        case "iterable":
+
+            const jstdout = new ShellReader()
+
+            ctx.runInNewContext = runInNewContext;
+            ctx.console = {
+                log: (...args) => {
+                    const ret = consoleFormat(...args);
+                    jstdout.write(ret + "\n");
+                },
+                error: console.error.bind(console)
+            };
+            ctx.stdout = new ShellWriter();
+            ctx.stdout.on("data", buf => {
+                jstdout.write(buf);
+            });
+            ctx.stdout.on("end", () => {
+                jstdout.end();
+                (ctx.stdout as ShellWriter).removeAllListeners();
+            });
+            ctx.stderr = new ShellWriter();
+            ctx.stderr.on("data", buf => {
+                console.error(buf.toString());
+            });
+            ctx.stderr.on("end", () => {
+                (ctx.stderr as ShellWriter).removeAllListeners();
+            });
+
+            if (redirectStdout) {
+                stdout = jstdout;
+            } else {
+                jstdout.pipe(process.stdout);
+            }
+
+            const jstdin = new ShellWriter();
+            ctx.stdin = new ShellReader();
+
+            (async function() {
+                const ctxin = ctx.stdin as ShellReader;
+                for await (const buf of jstdin) {
+                    ctxin.write(buf);
+                }
+                ctxin.end();
+            })();
+
+            if (redirectStdin) {
+                stdin = jstdin;
+            } else {
+                jstdin.end();
+            }
+
+            status = new Promise<number | undefined>((resolve, reject) => {
+                ctx.resolve = resolve;
+                ctx.reject = reject;
+            });
+
+            jswrap = `
+                (async function() {
+                    const close = () => {
+                        stdout.end();
+                    };
+                    try {
+                        const jscode = "${jscode}";
+                        const promise = new Promise((newResolve, newReject) => {
+                            const nctx = {
+                                args: args,
+                                stdin: stdin,
+                                stdout: stdout,
+                                stderr: stderr,
+                                console: console,
+                                resolve: newReject,
+                                reject: newReject
+                            };
+                            runInNewContext(jscode, nctx);
+                        });
+                        promise.then(status => { close(); resolve(status); }).catch(err => { close(); reject(err); });
+                    } catch (err) {
+                        close();
+                        reject(err);
+                    }
+                })()`
+            break; }
+        case "iterable": {
             // the function is asynchronous, wrapped in an async generator.
             // global stdin is async iterable or can also be used with the on("data") and on("end")
             // listeners (but not both in the same function) and yielding a value will write to stdout.
             // the function is considered complete when the async generator throws or returns,
             // the final yielded value will be used as the exit code if it is integral, otherwise 0 is used
-            break;
+            break; }
         default:
             break;
     }
 
+    if (jswrap === undefined) {
+        throw new Error("No wrapped js code");
+    }
     if (status === undefined) {
         throw new Error("No status");
     }
 
     try {
-        runInNewContext(jscode, ctx);
+        runInNewContext(jswrap, ctx);
     } catch (e) {
         console.error("JS error", e);
     }
