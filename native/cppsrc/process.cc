@@ -27,6 +27,9 @@ struct ProcessOptions
     bool redirectStdin;
     bool redirectStdout;
     bool redirectStderr;
+    bool interactive;
+    bool foreground;
+    int pgid;
 };
 
 struct BufferEmitter : public std::enable_shared_from_this<BufferEmitter>
@@ -583,6 +586,15 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
     if (pid == 0) {
         // child
 
+        if (opts.interactive) {
+            const pid_t npid = getpid();
+            const pid_t pgid = opts.pgid > 0 ? opts.pgid : npid;
+            setpgid(npid, pgid);
+            if (opts.foreground) {
+                tcsetpgrp(STDIN_FILENO, pgid);
+            }
+        }
+
         signal(SIGINT, SIG_DFL);
         signal(SIGQUIT, SIG_DFL);
         signal(SIGTSTP, SIG_DFL);
@@ -623,6 +635,15 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             envp[idx++] = strdup((env.first + "=" + env.second).c_str());
         }
 
+        if (!opts.redirectStdin) {
+            // I really have NO idea why I have to do this but it seems to fix issues
+
+            int dupped;
+            EINTRWRAP(dupped, dup(STDIN_FILENO));
+            EINTRWRAP(e, dup2(dupped, STDIN_FILENO));
+            EINTRWRAP(e, ::close(dupped));
+        }
+
         execve(proc->cmd.c_str(), const_cast<char*const*>(argv), envp);
 
         // notify parent
@@ -633,6 +654,11 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
         _exit(-1);
     } else if (pid > 0) {
         // parent
+
+        if (opts.interactive) {
+            const pid_t pgid = opts.pgid > 0 ? opts.pgid : pid;
+            setpgid(pid, pgid);
+        }
 
         if (opts.redirectStdin) {
             EINTRWRAP(e, ::close(stdinpipe[0]));
@@ -721,28 +747,32 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
 
             reader.add(proc);
         }
+
+        auto obj = Napi::Object::New(env);
+        if (proc) {
+            if (opts.redirectStderr) {
+                obj.Set("stderrCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStderr));
+            }
+            if (opts.redirectStdout) {
+                obj.Set("stdoutCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStdout));
+            }
+            if (opts.redirectStdin) {
+                obj.Set("stdinCtx", Wrap<std::shared_ptr<Process::Writer> >::wrap(env, proc->writer));
+            }
+        }
+        obj.Set("listen", Napi::Function::New(env, Listen));
+        obj.Set("write", Napi::Function::New(env, Write));
+        obj.Set("close", Napi::Function::New(env, Close));
+        obj.Set("pid", Napi::Number::New(env, pid));
+        obj.Set("promise", promise);
+
+        return obj;
     } else {
         // error
     }
 
-    auto obj = Napi::Object::New(env);
-    if (proc) {
-        if (opts.redirectStderr) {
-            obj.Set("stderrCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStderr));
-        }
-        if (opts.redirectStdout) {
-            obj.Set("stdoutCtx", Wrap<std::shared_ptr<BufferEmitter> >::wrap(env, proc->emitStdout));
-        }
-        if (opts.redirectStdin) {
-            obj.Set("stdinCtx", Wrap<std::shared_ptr<Process::Writer> >::wrap(env, proc->writer));
-        }
-    }
-    obj.Set("listen", Napi::Function::New(env, Listen));
-    obj.Set("write", Napi::Function::New(env, Write));
-    obj.Set("close", Napi::Function::New(env, Close));
-    obj.Set("promise", promise);
-
-    return obj;
+    // can't happen
+    __builtin_unreachable();
 }
 
 void Start(const Napi::CallbackInfo& info)
@@ -788,13 +818,23 @@ Napi::Value Launch(const Napi::CallbackInfo& info)
         proc->env = std::move(env);
     }
     ProcessOptions opts = {
-        true, true, true
+        true, true, true, false, false, -1
     };
     if (info[3].IsObject()) {
         const auto obj = info[3].As<Napi::Object>();
         opts.redirectStdin = obj.Get("redirectStdin").As<Napi::Boolean>().Value();
         opts.redirectStdout = obj.Get("redirectStdout").As<Napi::Boolean>().Value();
         opts.redirectStderr = obj.Get("redirectStderr").As<Napi::Boolean>().Value();
+        const auto interactiveValue = obj.Get("interactive");
+        if (interactiveValue.IsObject()) {
+            const auto interactive = interactiveValue.As<Napi::Object>();
+            opts.interactive = true;
+            opts.foreground = interactive.Get("foreground").As<Napi::Boolean>().Value();
+            const auto pgid = interactive.Get("pgid");
+            if (pgid.IsNumber()) {
+                opts.pgid = pgid.As<Napi::Number>().Int32Value();
+            }
+        }
     }
 
     return launchProcess(env, proc, opts);

@@ -115,6 +115,13 @@ export class Process
         throw new Error("Invalid process");
     }
 
+    get pid() {
+        if (this._launch.pid > 0) {
+            return this._launch.pid;
+        }
+        throw new Error("Invalid process");
+    }
+
     closeStdin() {
         if (this._launch.stdinCtx) {
             this._launch.close(this._launch.stdinCtx);

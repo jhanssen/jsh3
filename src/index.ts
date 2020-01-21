@@ -1,9 +1,10 @@
 import * as nearley from "nearley"
 import { jsh3_grammar } from "./parser"
 import { default as Readline, Data as ReadlineData, Completion as ReadlineCompletion } from "../native/readline";
+import { default as Shell } from "../native/shell";
+import { default as Process } from "../native/process";
 import { readProcess, ReadProcess } from "./process";
 import { runSeparators } from "./subshell";
-import { default as Process } from "../native/process";
 import { join as pathJoin } from "path";
 import { stat } from "fs";
 import { homedir } from "os";
@@ -262,10 +263,18 @@ function visitJS(node: any, line: string) {
 }
 
 function visitSep(node: any, line: string) {
-    runSeparators(node, line).then(arg => {
-        console.log("done sep", arg);
-    }).catch(e => {
-        console.error(e);
+    Readline.pause().then(() => {
+        runSeparators(node, line).then(arg => {
+            Shell.restore();
+            Readline.resume().then(() => {
+                console.log("done sep", arg);
+            });
+        }).catch(e => {
+            Shell.restore();
+            Readline.resume().then(() => {
+                console.error(e);
+            });
+        });
     });
 }
 
@@ -340,6 +349,8 @@ function processReadline(data: ReadlineData) {
         break;
     }
 }
+
+Shell.start();
 
 Readline.start(processReadline);
 Readline.readHistory(pathJoin(homedir(), ".jsh_history")).then(() => {

@@ -4,6 +4,7 @@ export interface OutCtx {}
 export interface Launch
 {
     promise: Promise<number>;
+    pid: number;
     write:(ctx: InCtx, buffer?: Buffer) => void;
     close:(ctx: InCtx) => void;
     listen:(ctx: OutCtx, listener: (buffer: Buffer) => void) => void;
@@ -17,6 +18,10 @@ export interface Options
     redirectStdin: boolean;
     redirectStdout: boolean;
     redirectStderr: boolean;
+    interactive: {
+        foreground: boolean;
+        pgid: number | undefined;
+    } | undefined;
 }
 
 declare namespace Native

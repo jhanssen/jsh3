@@ -18,7 +18,7 @@ interface CmdResult
     promise: Promise<number | undefined>;
 }
 
-async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<CmdResult> {
+async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<{ pid: number, result: CmdResult }> {
     envPush();
 
     try {
@@ -47,9 +47,12 @@ async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<
         if (cmd in internalCommands) {
             const internalCmd = internalCommands[cmd as keyof typeof internalCommands];
             return {
-                stdin: undefined,
-                stdout: undefined,
-                promise: internalCmd(args, env)
+                pid: -1,
+                result: {
+                    stdin: undefined,
+                    stdout: undefined,
+                    promise: internalCmd(args, env)
+                }
             };
         }
 
@@ -59,9 +62,12 @@ async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<
         envPop();
 
         return {
-            stdin: opts.redirectStdin ? proc.stdin : undefined,
-            stdout: opts.redirectStdout ? proc.stdout : undefined,
-            promise: proc.status
+            pid: proc.pid,
+            result: {
+                stdin: opts.redirectStdin ? proc.stdin : undefined,
+                stdout: opts.redirectStdout ? proc.stdout : undefined,
+                promise: proc.status
+            }
         };
     } catch (e) {
         envPop();
@@ -73,6 +79,7 @@ interface SubshellOptions
 {
     readable?: ShellReader;
     writable?: ShellWriter;
+    pgid?: number;
 }
 
 class Pipe
@@ -110,16 +117,23 @@ class Pipe
         }
 
         let source: Readable | undefined = firstSource;
+        let pgid = this._opts.pgid;
         const pnum = this._pipes.length;
         for (let i = 0; i < pnum; ++i) {
             const p = this._pipes[i];
             switch (p.type) {
             case "cmd":
-                all.push(await runCmd(p, this._source, {
+                const cmdr = await runCmd(p, this._source, {
                     redirectStdin: source !== undefined || i > 0,
                     redirectStdout : i < pnum - 1 || finalDestination !== undefined,
-                    redirectStderr: false
-                }));
+                    redirectStderr: false,
+                    interactive: {
+                        foreground: true,
+                        pgid: pgid
+                    }
+                });
+                pgid = cmdr.pid;
+                all.push(cmdr.result);
                 break;
             case "subshell":
                 let subopts: SubshellOptions = {};
@@ -128,6 +142,9 @@ class Pipe
                 }
                 if (source !== undefined || i > 0) {
                     subopts.writable = new ShellWriter();
+                }
+                if (pgid !== undefined) {
+                    subopts.pgid = pgid;
                 }
                 all.push({
                     stdout: subopts.readable,
