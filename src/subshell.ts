@@ -447,6 +447,21 @@ export async function runSeparators(cmds: any, source: string): Promise<number |
 
 export { CmdResult as JSResult };
 
+interface Global
+{
+    args: string[],
+    runInNewContext: typeof runInNewContext | undefined,
+    console: { log: typeof console.log, error: typeof console.error } | undefined
+    stdout: Writable | undefined,
+    stderr: Writable | undefined,
+    stdin: Buffer | Readable | undefined
+    resolve: StatusResolveFunction | undefined,
+    reject: RejectFunction | undefined,
+    env: EnvType,
+
+    [key: string]: any;
+}
+
 export async function runJS(js: any, source: string, redirectStdin: boolean, redirectStdout: boolean): Promise<CmdResult> {
     const jscode = source.substr(js.start + 1, js.end - js.start - 1).replace(/"/g, '\\"').replace(/\\n/g, "\\\\n");
     let jswrap: string | undefined;
@@ -459,18 +474,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
         args = await Promise.all(ps);
     }
 
-    const ctx: {
-        args: string[],
-        runInNewContext: typeof runInNewContext | undefined,
-        console: { log: typeof console.log, error: typeof console.error } | undefined
-        stdout: Writable | undefined,
-        stderr: Writable | undefined,
-        stdin: Buffer | Readable | undefined
-        resolve: StatusResolveFunction | undefined,
-        reject: RejectFunction | undefined,
-        env: EnvType,
-        Buffer: typeof Buffer
-    } = {
+    const ctx: Global = {
         args: args || [],
         runInNewContext: undefined,
         console: undefined,
@@ -479,9 +483,26 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
         stdin: undefined,
         resolve: undefined,
         reject: undefined,
-        env: envGet(),
-        Buffer: Buffer
+        env: envGet()
     };
+
+    const blacklist = ["globalThis", "console", "GLOBAL", "global", "root"];
+    const props = Object.getOwnPropertyNames(globalThis);
+    for (const k of props) {
+        if (!(k in ctx) && !blacklist.includes(k)) {
+            ctx[k] = (globalThis as any)[k];
+        }
+    }
+
+    const assignGlobal = `
+        function assignGlobal(ctx) {
+            const props = Object.getOwnPropertyNames(globalThis);
+            for (const k of props) {
+                if (!(k in ctx)) {
+                    ctx[k] = globalThis[k];
+                }
+            }
+        }`;
 
     let stdin: Writable | undefined;
     let stdout: Readable | undefined;
@@ -549,16 +570,17 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                         if (buf === undefined) buf = nbuf;
                         else buf = Buffer.concat([buf, nbuf]);
                     }
+                    ${assignGlobal}
                     const nctx = {
                         args: args,
                         env: env,
                         stdin: buf,
-                        console: console,
-                        Buffer: Buffer
+                        console: console
                     };
                     try {
                         const jscode = "${jscode}";
                         // console.log('jscode', jscode, nctx.stdin);
+                        assignGlobal(nctx);
                         const ret = runInNewContext(jscode, nctx);
                         if (typeof ret === 'number') { resolve(ret); }
                         else { if (ret !== undefined) console.log(ret); resolve(0); }
@@ -633,6 +655,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                     const close = () => {
                         stdout.end();
                     };
+                    ${assignGlobal}
                     try {
                         const jscode = "${jscode}";
                         const promise = new Promise((newResolve, newReject) => {
@@ -644,9 +667,9 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                                 stderr: stderr,
                                 console: console,
                                 resolve: newResolve,
-                                reject: newReject,
-                                Buffer: Buffer
+                                reject: newReject
                             };
+                            assignGlobal(nctx);
                             runInNewContext(jscode, nctx);
                         });
                         const status = await promise;
@@ -724,6 +747,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                     const close = () => {
                         stdout.end();
                     };
+                    ${assignGlobal}
                     try {
                         const jscode = "(async function* () { ${jscode} })()";
                         const nctx = {
@@ -732,9 +756,9 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                             stdin: stdin,
                             stdout: stdout,
                             stderr: stderr,
-                            console: console,
-                            Buffer: Buffer
+                            console: console
                         };
+                        assignGlobal(nctx);
                         const generator = runInNewContext(jscode, nctx);
                         let status = undefined;
                         const writeStatus = () => {
