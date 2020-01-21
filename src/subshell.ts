@@ -750,12 +750,16 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                     ${assignGlobal}
                     try {
                         const jscode = "(async function* () { ${jscode} })()";
+                        function sleep(ms) {
+                            return new Promise(resolve => setTimeout(resolve, ms));
+                        }
                         const nctx = {
                             args: args,
                             env: env,
                             stdin: stdin,
                             stdout: stdout,
                             stderr: stderr,
+                            sleep: sleep,
                             console: console
                         };
                         assignGlobal(nctx);
