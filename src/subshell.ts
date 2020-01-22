@@ -4,6 +4,7 @@ import { pathify } from "./utils";
 import { expand } from "./expand";
 import { env as envGet, push as envPush, pop as envPop, EnvType } from "./variable";
 import { commands as internalCommands } from "./commands";
+import { parseRedirections } from "./redirs";
 import { runInNewContext } from "vm";
 import { format as consoleFormat } from "util";
 
@@ -35,6 +36,8 @@ async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<
         for (const id of cmds.cmd) {
             ps.push(expand(id, source));
         }
+
+        console.log("really redirs", parseRedirections(cmds.redirs));
 
         const args = await Promise.all(ps);
         const cmd: string | undefined = args.shift();

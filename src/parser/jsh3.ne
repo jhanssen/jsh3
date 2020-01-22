@@ -13,12 +13,18 @@ const lexer = moo.states({
         lbracket: "[",
         rbracket: "]",
         comma: ",",
+        nsleftright: { match: /[0-9]+<>/, value: (s: string) => parseInt(s) },
+        sleftright: "<>",
+        nsrightright: { match: /[0-9]+>>/, value: (s: string) => parseInt(s) },
         nsright: { match: /[0-9]+>/, value: (s: string) => parseInt(s) },
+        nsleft: { match: /[0-9]+</, value: (s: string) => parseInt(s) },
         srightright: ">>",
         srightgr: ">=",
         sright: ">",
         sleftgr: "<=",
         sleft: "<",
+        ampsrightright: "&>>",
+        ampsright: "&>",
         and: "&&",
         or: "||",
         ampinteger: { match: /&[0-9+]+/, value: (s: string) => parseInt(s.slice(1)) },
@@ -114,9 +120,10 @@ subcmdmulti -> cmd (%semi _ subcmdmulti):?
 _ -> null | %whitespace {% function(d) { return null; } %}
 __ -> %whitespace {% function(d) { return null; } %}
 
-redirOut -> (%sright | %srightright | %nsright) _ (%ampinteger | %identifier | %integer)
-redirIn -> %sleft _ (%identifier | %integer)
-redirs -> _ (redirIn | redirOut)
+redirOut -> (%sright | %srightright | %nsright | %nsrightright | %ampsright | %ampsrightright) _ (%ampinteger | %identifier | %integer)
+redirIn -> (%sleft | %nsleft) _ (%ampinteger | %identifier | %integer)
+redirInOut -> (%sleftright | %nsleftright) _ (%identifier | %integer)
+redirs -> _ (redirIn | redirOut | redirInOut)
 redir -> null | redirs:+ {% extractRedir %}
 
 ifCondition -> "if" __ conditions _ %semi _ "then" __ cmdmulti (__ elifCondition):? (__ "else" __ cmdmulti):? __ "fi" redir {% extractIf %}
