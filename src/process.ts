@@ -4,7 +4,8 @@ import {
     InCtx as NativeProcessIn,
     OutCtx as NativeProcessOut,
     Options as NativeProcessOptions,
-    StatusOn as NativeProcessStatusOn
+    StatusOn as NativeProcessStatusOn,
+    Redirection as NativeProcessRedirection
 } from "../native/process";
 
 import { Readable, Writable } from "stream";
@@ -93,7 +94,7 @@ export class Process
     private _statusResolve: StatusResolveFunction | undefined;
     private _statusReject: RejectFunction | undefined;
 
-    constructor(cmd: string, args?: string[], env?: {[key: string]: string | undefined}, opts?: NativeProcessOptions) {
+    constructor(cmd: string, args?: string[], env?: {[key: string]: string | undefined}, opts?: NativeProcessOptions, redirs?: NativeProcessRedirection[]) {
         this._status = new Promise<number | undefined>((resolve, reject) => {
             this._statusResolve = resolve;
             this._statusReject = reject;
@@ -111,7 +112,7 @@ export class Process
                     break;
                 }
             }
-        }, opts);
+        }, opts, redirs);
     }
 
     get status() {

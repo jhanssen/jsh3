@@ -32,6 +32,20 @@ struct ProcessOptions
     int pgid;
 };
 
+// this is kept in sync with index.d.ts
+struct ProcessRedirection
+{
+    enum Type { Type_Input, Type_Output, Type_InputOut, Type_OutputAppend };
+    enum IO { IO_File, IO_FD };
+
+    Type type;
+    IO io;
+
+    std::string file;
+    int sourceFD;
+    int destFD;
+};
+
 struct BufferEmitter : public std::enable_shared_from_this<BufferEmitter>
 {
     struct Data
@@ -567,7 +581,7 @@ void Listen(const Napi::CallbackInfo& info)
     }
 }
 
-static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>& proc, const ProcessOptions& opts)
+static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>& proc, const ProcessOptions& opts, const std::vector<ProcessRedirection>& redirs)
 {
     // we'll need to notify the parent if we can't exec,
     // create a pipe with CLOEXEC and write to it if
@@ -654,6 +668,51 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             EINTRWRAP(dupped, dup(STDIN_FILENO));
             EINTRWRAP(e, dup2(dupped, STDIN_FILENO));
             EINTRWRAP(e, ::close(dupped));
+        }
+
+        auto fdopen = [runpipe](const ProcessRedirection& redir, int fl) {
+            int e;
+            int fd = open(redir.file.c_str(), fl, 0666);
+            if (fd == -1) {
+                // error
+                // not sure if I should print here
+                fprintf(stderr, "File not found: %s\n", redir.file.c_str());
+                char c = 2;
+                EINTRWRAP(e, ::write(runpipe[1], &c, 1));
+                EINTRWRAP(e, ::close(runpipe[1]));
+
+                _exit(-1);
+            } else if (fd != redir.sourceFD) {
+                EINTRWRAP(e, dup2(fd, redir.sourceFD));
+                EINTRWRAP(e, ::close(fd));
+            }
+        };
+
+        // apply the requested redirections
+        for (const auto& redir : redirs) {
+            switch (redir.io) {
+            case ProcessRedirection::IO_FD:
+                // we'd like to dup a fd
+                EINTRWRAP(e, dup2(redir.destFD, redir.sourceFD));
+                break;
+            case ProcessRedirection::IO_File:
+                switch (redir.type) {
+                case ProcessRedirection::Type_Input:
+                    // open file for input on sourceFD
+                    fdopen(redir, O_RDONLY);
+                    break;
+                case ProcessRedirection::Type_Output:
+                    fdopen(redir, O_WRONLY | O_CREAT);
+                    break;
+                case ProcessRedirection::Type_InputOut:
+                    fdopen(redir, O_RDWR | O_CREAT);
+                    break;
+                case ProcessRedirection::Type_OutputAppend:
+                    fdopen(redir, O_RDWR | O_APPEND | O_CREAT);
+                    break;
+                }
+                break;
+            }
         }
 
         execve(proc->cmd.c_str(), const_cast<char*const*>(argv), envp);
@@ -861,7 +920,29 @@ Napi::Value Launch(const Napi::CallbackInfo& info)
         }
     }
 
-    return launchProcess(env, proc, opts);
+    std::vector<ProcessRedirection> redirs;
+    if (info[5].IsArray()) {
+        const auto arr = info[5].As<Napi::Array>();
+        for (size_t i = 0; i < arr.Length(); ++i) {
+            const auto rv = arr.Get(i);
+            if (rv.IsObject()) {
+                const auto ro = rv.As<Napi::Object>();
+                std::string file;
+                if (ro.Has("file")) {
+                    file = ro.Get("file").As<Napi::String>().Utf8Value();
+                }
+                redirs.push_back({
+                        static_cast<ProcessRedirection::Type>(ro.Get("redirectionType").As<Napi::Number>().Int32Value()),
+                        static_cast<ProcessRedirection::IO>(ro.Get("ioType").As<Napi::Number>().Int32Value()),
+                        std::move(file),
+                        ro.Get("sourceFD").As<Napi::Number>().Int32Value(),
+                        ro.Get("destFD").As<Napi::Number>().Int32Value()
+                    });
+            }
+        }
+    }
+
+    return launchProcess(env, proc, opts, redirs);
 }
 
 Napi::Value Uid(const Napi::CallbackInfo& info)

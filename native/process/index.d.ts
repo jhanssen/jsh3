@@ -14,6 +14,20 @@ export interface Launch
     stdinCtx?: InCtx;
 }
 
+// this is kept in sync with process.cc
+export const enum RedirectionType { Input, Output, InputOutput, OutputAppend }
+export const enum RedirectionIOType { File, FD }
+
+export interface Redirection
+{
+    redirectionType: RedirectionType;
+    ioType: RedirectionIOType;
+
+    file?: string;
+    sourceFD: number;
+    destFD: number;
+}
+
 export interface Options
 {
     redirectStdin: boolean;
@@ -36,7 +50,8 @@ declare namespace Native
         args: string[] | undefined,
         env: {[key: string]: string | undefined} | undefined,
         callback: (type: StatusOn, status?: number | string) => void,
-        opts?: Options
+        opts?: Options,
+        redirs?: Redirection[]
     ): Launch;
 }
 

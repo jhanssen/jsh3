@@ -37,8 +37,6 @@ async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<
             ps.push(expand(id, source));
         }
 
-        console.log("really redirs", parseRedirections(cmds.redirs));
-
         const args = await Promise.all(ps);
         const cmd: string | undefined = args.shift();
         if (!cmd) {
@@ -58,7 +56,7 @@ async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<
         }
 
         const rcmd = await pathify(cmd);
-        const proc = new Process(rcmd, args, env, opts);
+        const proc = new Process(rcmd, args, env, opts, parseRedirections(cmds.redirs));
 
         envPop();
 
