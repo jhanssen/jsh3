@@ -702,7 +702,7 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
                     fdopen(redir, O_RDONLY);
                     break;
                 case ProcessRedirection::Type_Output:
-                    fdopen(redir, O_WRONLY | O_CREAT);
+                    fdopen(redir, O_WRONLY | O_CREAT | O_TRUNC);
                     break;
                 case ProcessRedirection::Type_InputOut:
                     fdopen(redir, O_RDWR | O_CREAT);
