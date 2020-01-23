@@ -130,6 +130,25 @@ struct Reader
 
 static Reader reader;
 
+struct State
+{
+    Mutex mutex;
+    std::vector<int> closeme;
+
+    void removeFD(int fd);
+};
+
+void State::removeFD(int fd)
+{
+    MutexLocker locker(&mutex);
+    auto it = std::find(closeme.begin(), closeme.end(), fd);
+    if (it != closeme.end()) {
+        closeme.erase(it);
+    }
+}
+
+static State state;
+
 Reader::Reader()
 {
     sigpipe[0] = sigpipe[1] = -1;
@@ -156,21 +175,23 @@ void BufferEmitter::emit(char* data, size_t size)
 
 static void handleRead(int* fd, const std::shared_ptr<BufferEmitter>& emitter)
 {
-    int nfd = *fd;
     int e;
     char buf[16384];
+    const int nfd = *fd;
     for (;;) {
         EINTRWRAP(e, ::read(nfd, buf, sizeof(buf)));
         if (e > 0) {
             emitter->emit(strndup(buf, e), e);
         } else if (e == 0) {
             EINTRWRAP(e, ::close(nfd));
+            state.removeFD(nfd);
             *fd = -1;
             break;
         } else {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 break;
             EINTRWRAP(e, ::close(nfd));
+            state.removeFD(nfd);
             *fd = -1;
             break;
         }
@@ -200,6 +221,7 @@ static void handleWrite(Process* proc)
             } else {
                 // badness has occurred
                 EINTRWRAP(e, ::close(proc->stdin));
+                state.removeFD(proc->stdin);
                 proc->stdin = -1;
             }
             return;
@@ -354,6 +376,7 @@ void Reader::start(const Napi::Env& env)
                                          //printf("closing stdin\n");
                                          proc->pendingClose = false;
                                          EINTRWRAP(e, ::close(proc->stdin));
+                                         state.removeFD(proc->stdin);
                                          proc->stdin = -1;
                                      }
                                  }
@@ -646,6 +669,14 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             EINTRWRAP(e, ::close(stderrpipe[1]));
         }
 
+        {
+            // close any pending pipes for other processes
+            // don't grab the mutex here as we're in a fork
+            for (const int fd : state.closeme) {
+                EINTRWRAP(e, ::close(fd));
+            }
+        }
+
         const char** argv = reinterpret_cast<const char**>(malloc((proc->args.size() + 2) * sizeof(char*)));
         argv[0] = strdup(proc->cmd.c_str());
         argv[proc->args.size() + 1] = 0;
@@ -788,22 +819,28 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             proc->stderr = stderrpipe[0];
 
             if (opts.redirectStdin) {
-                e = fcntl(stdinpipe[1], F_GETFL);
+                e = fcntl(proc->stdin, F_GETFL);
                 if (e != -1) {
-                    fcntl(stdinpipe[1], F_SETFL, e | O_NONBLOCK);
+                    fcntl(proc->stdin, F_SETFL, e | O_NONBLOCK);
                 }
+                MutexLocker locker(&state.mutex);
+                state.closeme.push_back(proc->stdin);
             }
             if (opts.redirectStdout) {
-                e = fcntl(stdoutpipe[0], F_GETFL);
+                e = fcntl(proc->stdout, F_GETFL);
                 if (e != -1) {
-                    fcntl(stdoutpipe[0], F_SETFL, e | O_NONBLOCK);
+                    fcntl(proc->stdout, F_SETFL, e | O_NONBLOCK);
                 }
+                MutexLocker locker(&state.mutex);
+                state.closeme.push_back(proc->stdout);
             }
             if (opts.redirectStderr) {
-                e = fcntl(stderrpipe[0], F_GETFL);
+                e = fcntl(proc->stderr, F_GETFL);
                 if (e != -1) {
-                    fcntl(stderrpipe[0], F_SETFL, e | O_NONBLOCK);
+                    fcntl(proc->stderr, F_SETFL, e | O_NONBLOCK);
                 }
+                MutexLocker locker(&state.mutex);
+                state.closeme.push_back(proc->stderr);
             }
 
             proc->pid = pid;
