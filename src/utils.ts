@@ -18,14 +18,17 @@ export async function pathify(cmd: string): Promise<string> {
     for (const p of paths) {
         // should maybe do these sequentially in order to avoid races
         const j = pathJoin(p, cmd);
-        const stats = await pstat(j);
 
-        if (stats.isFile()) {
-            if ((uid === stats.uid && (stats.mode & 0o500) === 0o500)
-                || (gids.includes(stats.gid) && (stats.mode & 0o050) === 0o050)
-                || ((stats.mode & 0o005) === 0o005)) {
-                return j;
+        try {
+            const stats = await pstat(j);
+            if (stats.isFile()) {
+                if ((uid === stats.uid && (stats.mode & 0o500) === 0o500)
+                    || (gids.includes(stats.gid) && (stats.mode & 0o050) === 0o050)
+                    || ((stats.mode & 0o005) === 0o005)) {
+                    return j;
+                }
             }
+        } catch (e) {
         }
     }
 
