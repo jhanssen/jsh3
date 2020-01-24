@@ -302,9 +302,9 @@ char** State::completer(const char* text, int start, int end)
                         MutexLocker locker(&state.completion.mutex);
                         assert(!state.completion.inComplete);
                         if (!state.completion.results.empty()) {
-                            char** array = static_cast<char**>(malloc((2 + state.completion.results.size()) * sizeof(*array)));
-                            array[0] = strdup(longest_common_prefix(text, state.completion.results).c_str());
-                            size_t ptr = 1;
+                            char** array = static_cast<char**>(malloc((1 + state.completion.results.size()) * sizeof(*array)));
+                            // array[0] = strdup(longest_common_prefix(text, state.completion.results).c_str());
+                            size_t ptr = 0;
                             for (const auto& m : state.completion.results) {
                                 array[ptr++] = strdup(m.c_str());
                             }

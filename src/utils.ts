@@ -49,8 +49,54 @@ export function pathify(cmd: string): Promise<string> {
 }
 
 export async function isExecutable(path: string): Promise<boolean> {
-    const stats = await pstat(path);
-    return !!(stats.isFile() && ((uid === stats.uid && stats.mode & 0o500)
-                                 || (gids.includes(stats.gid) && stats.mode & 0o050)
-                                 || (stats.mode & 0o005)));
+    try {
+        const stats = await pstat(path);
+        return (stats.isFile() && ((uid === stats.uid && (stats.mode & 0o500) === 0o500)
+                                   || (gids.includes(stats.gid) && (stats.mode & 0o050) === 0o050)
+                                   || ((stats.mode & 0o005) === 0o005)));
+    } catch (e) {
+        // ugh
+    }
+    return false;
+}
+
+export async function isExecutableOrDirectory(path: string): Promise<boolean> {
+    try {
+        const stats = await pstat(path);
+        return (stats.isDirectory() ||
+                (stats.isFile() && ((uid === stats.uid && (stats.mode & 0o500) === 0o500)
+                                    || (gids.includes(stats.gid) && (stats.mode & 0o050) === 0o050)
+                                    || ((stats.mode & 0o005) === 0o005))));
+    } catch (e) {
+        // ugh again
+    }
+    return false;
+}
+
+// adopted from https://github.com/eliben/code-for-blog/blob/master/2016/readline-samples/utils.cpp, public domain
+export function longestCommonPrefix(base: string, strings: string[]): string
+{
+    switch (strings.length) {
+    case 0:
+        return "";
+    case 1:
+        return strings[0];
+    }
+    let prefix = base;
+    const first = strings[0];
+    const num = strings.length;
+    while (true) {
+        let nextloc = prefix.length;
+        if (first.length <= nextloc) {
+            return prefix;
+        }
+        let nextchar = first[nextloc];
+        for (let i = 1; i < num; ++i) {
+            const cur = strings[i];
+            if (cur.length <= nextloc || cur[nextloc] !== nextchar) {
+                return prefix;
+            }
+        }
+        prefix += nextchar;
+    }
 }
