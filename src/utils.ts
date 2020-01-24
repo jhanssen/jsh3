@@ -9,43 +9,27 @@ const gids = Process.gids();
 
 const pstat = promisify(stat);
 
-export function pathify(cmd: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-        if (cmd.includes("/")) {
-            resolve(cmd);
-            return;
-        }
-        const paths = (env().PATH || "").split(":");
+export async function pathify(cmd: string): Promise<string> {
+    if (cmd.includes("/")) {
+        return cmd;
+    }
+    const paths = (env().PATH || "").split(":");
 
-        let num = 0;
-        const reject1 = () => {
-            if (++num === paths.length) {
-                reject(`File not found ${cmd}`);
+    for (const p of paths) {
+        // should maybe do these sequentially in order to avoid races
+        const j = pathJoin(p, cmd);
+        const stats = await pstat(j);
+
+        if (stats.isFile()) {
+            if ((uid === stats.uid && (stats.mode & 0o500) === 0o500)
+                || (gids.includes(stats.gid) && (stats.mode & 0o050) === 0o050)
+                || ((stats.mode & 0o005) === 0o005)) {
+                return j;
             }
-        };
-
-        for (const p of paths) {
-            // should maybe do these sequentially in order to avoid races
-            const j = pathJoin(p, cmd);
-            stat(j, (err, stats) => {
-                if (err || !stats) {
-                    reject1();
-                    return;
-                }
-                if (stats.isFile()) {
-                    if ((uid === stats.uid && stats.mode & 0o500)
-                        || (gids.includes(stats.gid) && stats.mode & 0o050)
-                        || (stats.mode & 0o005)) {
-                        resolve(j);
-                    } else {
-                        reject1();
-                    }
-                } else {
-                    reject1();
-                }
-            });
         }
-    });
+    }
+
+    throw new Error(`Unable to find ${cmd} in PATH`);
 }
 
 export async function isExecutable(path: string): Promise<boolean> {
