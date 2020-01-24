@@ -1,6 +1,6 @@
 import { Completion as ReadlineCompletion } from "../../native/readline";
 import { top } from "../variable";
-import { isExecutable, isExecutableOrDirectory, longestCommonPrefix } from "../utils";
+import { isExecutable, isExecutableOrDirectory, longestCommonPrefix, filterAsync, mapAsync } from "../utils";
 import { commands as internalCommands } from "../commands";
 import { promisify } from "util";
 import { stat, readdir } from "fs";
@@ -103,25 +103,6 @@ function finalize(items: string[], prefix: string, base?: string): string[] {
         items.unshift(has ? slashify(prefix) : prefix);
     }
     return items;
-}
-
-// mostly lifted from https://stackoverflow.com/questions/33355528/filtering-an-array-with-a-function-that-returns-a-promise
-async function filterAsync<T>(args: T[], predicate: (arg: T) => Promise<boolean>): Promise<T[]> {
-    // Take a copy of the array, it might mutate by the time we've finished
-    const data = Array.from(args);
-    // Transform all the elements into an array of promises using the predicate
-    // as the promise
-    return Promise.all(data.map(element => predicate(element)))
-    // Use the result of the promises to call the underlying sync filter function
-        .then(result => {
-            return data.filter((element, index) => {
-                return result[index];
-            });
-        });
-}
-
-async function mapAsync<T>(args: T[], mapper: (arg: T) => Promise<T>): Promise<T[]> {
-    return Promise.all(args.map(mapper));
 }
 
 type TraverseFilter = (path: string) => Promise<boolean>;

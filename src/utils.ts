@@ -100,3 +100,22 @@ export function longestCommonPrefix(base: string, strings: string[]): string
         prefix += nextchar;
     }
 }
+
+// mostly lifted from https://stackoverflow.com/questions/33355528/filtering-an-array-with-a-function-that-returns-a-promise
+export async function filterAsync<T>(args: T[], predicate: (arg: T) => Promise<boolean>): Promise<T[]> {
+    // Take a copy of the array, it might mutate by the time we've finished
+    const data = Array.from(args);
+    // Transform all the elements into an array of promises using the predicate
+    // as the promise
+    return Promise.all(data.map(element => predicate(element)))
+    // Use the result of the promises to call the underlying sync filter function
+        .then(result => {
+            return data.filter((element, index) => {
+                return result[index];
+            });
+        });
+}
+
+export async function mapAsync<T>(args: T[], mapper: (arg: T) => Promise<T>): Promise<T[]> {
+    return Promise.all(args.map(mapper));
+}
