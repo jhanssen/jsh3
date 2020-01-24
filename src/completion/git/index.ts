@@ -2,6 +2,7 @@ import { expand as expandFile } from "../file";
 import { simple, sorted as simpleSorted } from "../simple";
 import { Completion as ReadlineCompletion } from "../../../native/readline";
 
+// from /usr/local/share/zsh/functions/_git
 const main_porcelain_commands = {
     "add": "add file contents to index",
     "am": "apply patches from a mailbox",
