@@ -187,8 +187,16 @@ async function initCompletion(cmds: {[key: string]: string}) {
 (async function() {
     try {
         await initCompletion(main_porcelain_commands);
+        await initCompletion(ancillary_manipulator_commands);
+        await initCompletion(ancillary_interrogator_commands);
+        await initCompletion(interaction_commands);
+        await initCompletion(plumbing_manipulator_commands);
+        await initCompletion(plumbing_interrogator_commands);
+        await initCompletion(plumbing_sync_commands);
+        await initCompletion(plumbing_sync_helper_commands);
+        await initCompletion(plumbing_internal_helper_commands);
     } catch (e) {
-        console.log("failed to init git completions", e);
+        console.error("failed to init git completions", e);
     }
     sortedCompletions = Object.keys(completions).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
 })();
