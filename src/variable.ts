@@ -15,3 +15,7 @@ export function pop() {
 export function env() {
     return envs[envs.length - 1];
 }
+
+export function top() {
+    return envs[0];
+}

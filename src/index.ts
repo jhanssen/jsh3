@@ -3,6 +3,7 @@ import { jsh3_grammar } from "./parser"
 import { default as Readline, Data as ReadlineData, Completion as ReadlineCompletion } from "../native/readline";
 import { default as Shell } from "../native/shell";
 import { default as Process } from "../native/process";
+import { complete } from "./completion";
 import { readProcess, ReadProcess } from "./process";
 import { runSeparators } from "./subshell";
 import { join as pathJoin } from "path";
@@ -332,11 +333,12 @@ function processLines(lines: string[] | undefined) {
 }
 
 function processCompletion(data: ReadlineCompletion | undefined) {
-    if (!data)
+    if (data === undefined)
         return;
 
     //console.log("want to complete", data);
-    data.complete(["faff"]);
+    //data.complete(["faff"]);
+    complete(data);
 }
 
 function processReadline(data: ReadlineData) {

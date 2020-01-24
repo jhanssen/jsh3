@@ -1,6 +1,7 @@
 import { default as Readline } from "../native/readline";
 import { default as Process } from "../native/process";
 import { EnvType } from "./variable";
+import { clearCache as clearExecutableCache } from "./completion/file";
 
 async function exitcmd(args: string[], env: EnvType) {
     Process.stop();
@@ -18,15 +19,21 @@ async function exportcmd(args: string[], env: EnvType) {
     return 0;
 }
 
-async function env(args: string[], env: EnvType) {
+async function envcmd(args: string[], env: EnvType) {
     for (const [k, v] of Object.entries(env)) {
         console.log(`${k}=${v}`);
     }
     return 0;
 }
 
+async function rehashcmd(args: string[], env: EnvType) {
+    clearExecutableCache();
+    return 0;
+}
+
 export const commands = {
-    env: env,
+    env: envcmd,
     exit: exitcmd,
-    export: exportcmd
+    export: exportcmd,
+    rehash: rehashcmd
 };
