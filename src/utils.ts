@@ -58,7 +58,7 @@ export async function isExecutableOrDirectory(path: string): Promise<boolean> {
     return false;
 }
 
-// adopted from https://github.com/eliben/code-for-blog/blob/master/2016/readline-samples/utils.cpp, public domain
+// adapted from https://github.com/eliben/code-for-blog/blob/master/2016/readline-samples/utils.cpp, public domain
 export function longestCommonPrefix(base: string, strings: string[]): string
 {
     switch (strings.length) {

@@ -190,13 +190,7 @@ export async function file(cmd: string, data: ReadlineCompletion): Promise<strin
             }
         }
     } else {
-        // if we contain a '/' then we want to traverse a specific directory
-        // otherwise we want to traverse the current directory.
-        if (data.text.indexOf('/') >= 0) {
-            return await traverse(data);
-        } else {
-            return await traverse(data);
-        }
+        return await traverse(data);
     }
     return [];
 }
