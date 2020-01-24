@@ -16,10 +16,8 @@ export async function pathify(cmd: string): Promise<string> {
     const paths = (env().PATH || "").split(":");
 
     for (const p of paths) {
-        // should maybe do these sequentially in order to avoid races
-        const j = pathJoin(p, cmd);
-
         try {
+            const j = pathJoin(p, cmd);
             const stats = await pstat(j);
             if (stats.isFile()) {
                 if ((uid === stats.uid && (stats.mode & 0o500) === 0o500)
