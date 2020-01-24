@@ -1,10 +1,11 @@
 import { Completion as ReadlineCompletion } from "../../native/readline";
 import { file } from "./file";
+import { git } from "./git";
 
 type CompleterFunction = (cmd: string, data: ReadlineCompletion) => Promise<string[]>;
 
 const cmds: {[key: string]: CompleterFunction} = {
-    "ls": file
+    git: git,
 };
 
 function extractcmd(data: ReadlineCompletion)
@@ -20,7 +21,7 @@ export function complete(data: ReadlineCompletion)
     let completer: CompleterFunction | undefined;
 
     const cmd = extractcmd(data);
-    if (cmd in cmds) {
+    if (data.start > 0 && cmd in cmds) {
         completer = cmds[cmd];
     }
 

@@ -58,34 +58,6 @@ export async function isExecutableOrDirectory(path: string): Promise<boolean> {
     return false;
 }
 
-// adapted from https://github.com/eliben/code-for-blog/blob/master/2016/readline-samples/utils.cpp, public domain
-export function longestCommonPrefix(base: string, strings: string[]): string
-{
-    switch (strings.length) {
-    case 0:
-        return "";
-    case 1:
-        return strings[0];
-    }
-    let prefix = base;
-    const first = strings[0];
-    const num = strings.length;
-    while (true) {
-        let nextloc = prefix.length;
-        if (first.length <= nextloc) {
-            return prefix;
-        }
-        let nextchar = first[nextloc];
-        for (let i = 1; i < num; ++i) {
-            const cur = strings[i];
-            if (cur.length <= nextloc || cur[nextloc] !== nextchar) {
-                return prefix;
-            }
-        }
-        prefix += nextchar;
-    }
-}
-
 // mostly lifted from https://stackoverflow.com/questions/33355528/filtering-an-array-with-a-function-that-returns-a-promise
 export async function filterAsync<T>(args: T[], predicate: (arg: T) => Promise<boolean>): Promise<T[]> {
     // Take a copy of the array, it might mutate by the time we've finished
@@ -103,4 +75,25 @@ export async function filterAsync<T>(args: T[], predicate: (arg: T) => Promise<b
 
 export async function mapAsync<T>(args: T[], mapper: (arg: T) => Promise<T>): Promise<T[]> {
     return Promise.all(args.map(mapper));
+}
+
+// the functions from path are completely garbage
+export function dirname(str: string) {
+    const ls = str.lastIndexOf('/');
+    if (ls === -1) {
+        return "";
+    }
+    return str.substr(0, ls + 1);
+}
+
+export function basename(str: string) {
+    const ls = str.lastIndexOf('/');
+    if (ls === -1) {
+        return "";
+    }
+    return str.substr(ls + 1);
+}
+
+export function join(...args: string[]) {
+    return args.filter(a => a.length > 0).join("/").replace(/\/\//g, "/");
 }

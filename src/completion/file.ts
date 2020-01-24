@@ -1,10 +1,11 @@
-import { Completion as ReadlineCompletion } from "../../native/readline";
-import { top } from "../variable";
-import { isExecutable, isExecutableOrDirectory, longestCommonPrefix, filterAsync, mapAsync } from "../utils";
-import { commands as internalCommands } from "../commands";
+import bsearch from "binary-search";
 import { promisify } from "util";
 import { stat, readdir } from "fs";
-import bsearch from "binary-search";
+import { Completion as ReadlineCompletion } from "../../native/readline";
+import { top } from "../variable";
+import { commands as internalCommands } from "../commands";
+import { finalize } from "./simple";
+import * as utils from "../utils";
 
 const cache: {
     globalExecutables: string[]
@@ -17,33 +18,6 @@ const promise = {
     stat: promisify(stat)
 };
 
-function slashify(str: string) {
-    if (str.length > 0 && str[str.length - 1] !== '/')
-        str += '/';
-    return str;
-}
-
-// the functions from path are completely garbage
-function dirname(str: string) {
-    const ls = str.lastIndexOf('/');
-    if (ls === -1) {
-        return "";
-    }
-    return str.substr(0, ls + 1);
-}
-
-function basename(str: string) {
-    const ls = str.lastIndexOf('/');
-    if (ls === -1) {
-        return "";
-    }
-    return str.substr(ls + 1);
-}
-
-function join(...args: string[]) {
-    return args.filter(a => a.length > 0).join("/").replace(/\/\//g, "/");
-}
-
 function fillGlobalExecutablesFromPath(path: string) {
     return (async function() {
         try {
@@ -51,7 +25,7 @@ function fillGlobalExecutablesFromPath(path: string) {
             for (const r of read) {
                 // should we do a burst instead of just one by one?
                 try {
-                    if (await isExecutable(join(path, r)))
+                    if (await utils.isExecutable(utils.join(path, r)))
                         cache.globalExecutables.push(r);
                 } catch (e) {
                     // eat this too
@@ -81,39 +55,9 @@ function fillGlobalExecutables() {
     return Promise.all(promises);
 }
 
-function finalize(items: string[], prefix: string, base?: string): string[] {
-    if (items.length === 0) {
-        return items;
-    }
-    if (items.length === 1) {
-        if (items[0].length > 0) {
-            if (items[0][items[0].length - 1] !== '/')
-                items[0] += ' ';
-            if (base !== undefined) {
-                items[0] = base + items[0];
-            }
-        }
-    } else {
-        // find the longest common substring, set that as the first
-        // element of the array and then prepend base (if exists)
-
-        // this is a bit gnarly, should be reworked
-        const has = prefix.length > 0 ? (prefix[prefix.length - 1] === '/') : false;
-        prefix = join(dirname(prefix), longestCommonPrefix(basename(prefix), items));
-        items.unshift(has ? slashify(prefix) : prefix);
-    }
-    return items;
-}
-
 type TraverseFilter = (path: string) => Promise<boolean>;
 
-async function traverse(data: ReadlineCompletion, options?: { filter?: TraverseFilter }): Promise<string[]> {
-    // find the last '/', if we don't have one of those then we don't have any completions
-    if (data.start === 0 && data.text.length === 0) {
-        return [];
-    }
-
-    const dir = data.text;
+export async function expand(dir: string, traverseFilter?: TraverseFilter): Promise<string[]> {
     const last = dir.lastIndexOf('/');
     // everything before and including the last slash is the directory we want to read
     const path = last === -1 ? "" : dir.substr(0, last + 1);
@@ -122,13 +66,13 @@ async function traverse(data: ReadlineCompletion, options?: { filter?: TraverseF
     //console.log("wepp", path, filter);
 
     let read = (await promise.readdir(path || ".")).concat([".", ".."]).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
-    if (options && options.filter) {
+    if (traverseFilter) {
         // uuugh, rethink this!
-        read = (await filterAsync(read.map(r => path + r), options.filter)).map(r => r.substr(path.length));
+        read = (await utils.filterAsync(read.map(r => path + r), traverseFilter)).map(r => r.substr(path.length));
     }
-    read = await mapAsync(read, async function(file) {
+    read = await utils.mapAsync(read, async function(file) {
         try {
-            const stats = await promise.stat(join(path, file));
+            const stats = await promise.stat(utils.join(path, file));
             if (stats.isDirectory())
                 return file + "/";
         } catch (e) {
@@ -137,7 +81,7 @@ async function traverse(data: ReadlineCompletion, options?: { filter?: TraverseF
         return file;
     });
     if (filter.length === 0) {
-        return finalize(read, data.text);
+        return finalize(read, dir);
     }
 
     let ret = bsearch(read, filter, (element, needle) => element.localeCompare(needle, "en", { sensitivity: "base" }));
@@ -149,7 +93,16 @@ async function traverse(data: ReadlineCompletion, options?: { filter?: TraverseF
     while (ret < read.length && read[ret].toLowerCase().startsWith(filter)) {
         comp.push(read[ret++]);
     }
-    return finalize(comp, data.text, path);
+    return finalize(comp, dir, path);
+}
+
+async function traverse(data: ReadlineCompletion, traverseFilter?: TraverseFilter): Promise<string[]> {
+    // find the last '/', if we don't have one of those then we don't have any completions
+    if (data.start === 0 && data.text.length === 0) {
+        return [];
+    }
+
+    return await expand(data.text, traverseFilter);
 }
 
 export async function file(cmd: string, data: ReadlineCompletion): Promise<string[]> {
@@ -159,7 +112,7 @@ export async function file(cmd: string, data: ReadlineCompletion): Promise<strin
     if (data.start === 0) {
         if (cmd.indexOf('/') >= 0) {
             // if we start with a path character, traverse with an executable filter
-            return await traverse(data, { filter: isExecutableOrDirectory });
+            return await traverse(data, utils.isExecutableOrDirectory);
         } else {
             // if we don't start with a path character ('.' or '/') then complete on global executables
             if (cache.globalExecutables.length === 0) {
