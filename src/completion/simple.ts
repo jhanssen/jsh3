@@ -1,5 +1,6 @@
 import { Completion as ReadlineCompletion } from "../../native/readline";
 import { join, dirname, basename } from "../utils";
+import bsearch from "binary-search";
 
 function slashify(str: string) {
     if (str.length > 0 && str[str.length - 1] !== '/')
@@ -65,4 +66,16 @@ export function finalize(items: string[], prefix: string, base?: string): string
         items.unshift(has ? slashify(prefix) : prefix);
     }
     return items;
+}
+
+export function sorted(items: string[], filter: string): string[] {
+    let ret = bsearch(items, filter, (element, needle) => element.localeCompare(needle, "en", { sensitivity: "base" }));
+    if (ret < 0) {
+        ret = Math.abs(ret) - 1;
+    }
+    const comp = [];
+    while (ret < items.length && items[ret].toLowerCase().startsWith(filter)) {
+        comp.push(items[ret++]);
+    }
+    return finalize(comp, filter);
 }

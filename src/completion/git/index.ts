@@ -1,7 +1,6 @@
 import { expand as expandFile } from "../file";
-import { simple, finalize } from "../simple";
+import { simple, sorted as simpleSorted } from "../simple";
 import { Completion as ReadlineCompletion } from "../../../native/readline";
-import bsearch from "binary-search";
 
 const main_porcelain_commands = {
     "add": "add file contents to index",
@@ -211,15 +210,7 @@ export async function git(cmd: string, data: ReadlineCompletion): Promise<string
     }
     if (input.length === 2) {
         // complete on command
-        let ret = bsearch(sortedCompletions, input[1], (element, needle) => element.localeCompare(needle, "en", { sensitivity: "base" }));
-        if (ret < 0) {
-            ret = Math.abs(ret) - 1;
-        }
-        const comp = [];
-        while (ret < sortedCompletions.length && sortedCompletions[ret].toLowerCase().startsWith(input[1])) {
-            comp.push(sortedCompletions[ret++]);
-        }
-        return finalize(comp, input[1]);
+        return simpleSorted(sortedCompletions, input[1]);
     } else if (input[1] in completions) {
         const comp = completions[input[1]];
         return await comp.completion(input);
