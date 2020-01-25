@@ -20,10 +20,10 @@ export function simple(input: ReadlineCompletion): string[] {
 export function longestCommonPrefix(base: string, strings: string[]): string
 {
     switch (strings.length) {
-        case 0:
-            return "";
-        case 1:
-            return strings[0];
+    case 0:
+        return "";
+    case 1:
+        return strings[0];
     }
     let prefix = base;
     const first = strings[0];
@@ -78,4 +78,27 @@ export function sorted(items: string[], filter: string): string[] {
         comp.push(items[ret++]);
     }
     return finalize(comp, filter);
+}
+
+export function filterPath(items: string[], base: string, prefix: string): string[] {
+    const ret = [];
+    for (const item of items) {
+        if (item.indexOf(base) !== 0)
+            continue;
+        // find the previous and next breaks
+        let next = item.indexOf('/', base.length);
+        if (next === -1) {
+            next = item.length;
+        }
+        let prev = base.length - 1;
+        while (prev >= 0 && item[prev] !== '/') {
+            --prev;
+        }
+        if (prev < 0)
+            prev = 0;
+        const newitem = item.substr(prev, next - prev + 1);
+        if (ret.indexOf(newitem) === -1)
+            ret.push(newitem);
+    }
+    return finalize(ret, prefix, prefix);
 }

@@ -173,7 +173,7 @@ async function fileCompletion(input: string[]): Promise<string[]> {
 async function initCompletion(cmds: {[key: string]: string}) {
     for (const [cmd, help] of Object.entries(cmds)) {
         try {
-            completions[cmd] = { help: help, completion: await import(`./cmd/${cmd}`) };
+            completions[cmd] = { help: help, completion: (await import(`./cmd/${cmd}`)).default };
         } catch (e) {
             if (typeof e === "object" && e.code === "MODULE_NOT_FOUND") {
                 completions[cmd] = { help: help, completion: fileCompletion };

@@ -58,6 +58,24 @@ export async function isExecutableOrDirectory(path: string): Promise<boolean> {
     return false;
 }
 
+export async function isFile(path: string): Promise<boolean> {
+    try {
+        return (await pstat(path)).isFile();
+    } catch (e) {
+        // ugh
+    }
+    return false;
+}
+
+export async function isDirectory(path: string): Promise<boolean> {
+    try {
+        return (await pstat(path)).isDirectory();
+    } catch (e) {
+        // ugh
+    }
+    return false;
+}
+
 // mostly lifted from https://stackoverflow.com/questions/33355528/filtering-an-array-with-a-function-that-returns-a-promise
 export async function filterAsync<T>(args: T[], predicate: (arg: T) => Promise<boolean>): Promise<T[]> {
     // Take a copy of the array, it might mutate by the time we've finished
@@ -89,7 +107,7 @@ export function dirname(str: string) {
 export function basename(str: string) {
     const ls = str.lastIndexOf('/');
     if (ls === -1) {
-        return "";
+        return str;
     }
     return str.substr(ls + 1);
 }

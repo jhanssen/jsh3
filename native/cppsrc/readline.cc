@@ -121,15 +121,15 @@ int char_is_quoted(char* string, int eindex)
     std::vector<State> state;
     state.push_back(Normal);
     auto current = [&state]() {
-                       return state.back();
-                   };
+        return state.back();
+    };
     auto maybePop = [&state](State s) {
-                        if (state.back() == s) {
-                            state.pop_back();
-                            return true;
-                        }
-                        return false;
-                    };
+        if (state.back() == s) {
+            state.pop_back();
+            return true;
+        }
+        return false;
+    };
     for (int i = 0; i <= eindex;) {
         wasEscaped = current() == Escape;
         switch (string[i]) {
@@ -360,15 +360,15 @@ void State::readlineDeinit()
 void State::run(void*)
 {
     auto processTasks = []() {
-                            TaskQuery query;
-                            for (;;) {
-                                if (!state.tasks.queries.pop(query))
-                                    break;
-                                const auto ret = query.task(query.argument);
-                                state.tasks.replies.push({ std::move(query.promise), true, std::move(ret) });
-                                uv_async_send(&state.tasks.async);
-                            }
-                        };
+        TaskQuery query;
+        for (;;) {
+            if (!state.tasks.queries.pop(query))
+                break;
+            const auto ret = query.task(query.argument);
+            state.tasks.replies.push({ std::move(query.promise), true, std::move(ret) });
+            uv_async_send(&state.tasks.async);
+        }
+    };
 
     state.stopped = false;
 
@@ -635,8 +635,8 @@ Napi::Value Start(const Napi::CallbackInfo& info)
 
     uv_signal_init(uv_default_loop(), &state.winch);
     uv_signal_start(&state.winch, [](uv_signal_t*, int) {
-                                      state.wakeup(State::WakeupReason::Winch);
-                                  }, SIGWINCH);
+        state.wakeup(State::WakeupReason::Winch);
+    }, SIGWINCH);
 
     uv_thread_create(&state.thread, State::run, 0);
     state.running = true;
@@ -781,17 +781,16 @@ Napi::Value ReadHistory(const Napi::CallbackInfo& info)
         throw Napi::TypeError::New(env, "First argument needs to be a string");
     }
 
-    return state.runTask(env, info[0],
-                         [](const Variant& arg) -> Variant {
-                             if (auto nstr = std::get_if<std::string>(&arg)) {
-                                 state.historyFile = *nstr;
-                                 const int ret = read_history(nstr->c_str());
-                                 if (!ret) {
-                                     using_history();
-                                 }
-                             }
-                             return Undefined;
-                         });
+    return state.runTask(env, info[0], [](const Variant& arg) -> Variant {
+        if (auto nstr = std::get_if<std::string>(&arg)) {
+            state.historyFile = *nstr;
+            const int ret = read_history(nstr->c_str());
+            if (!ret) {
+                using_history();
+            }
+        }
+        return Undefined;
+    });
 }
 
 Napi::Value WriteHistory(const Napi::CallbackInfo& info)
@@ -802,14 +801,13 @@ Napi::Value WriteHistory(const Napi::CallbackInfo& info)
         throw Napi::TypeError::New(env, "First argument needs to be a string");
     }
 
-    return state.runTask(env, info[0],
-                         [](const Variant& arg) -> Variant {
-                             if (auto nstr = std::get_if<std::string>(&arg)) {
-                                 state.historyFile = *nstr;
-                                 write_history(nstr->c_str());
-                             }
-                             return Undefined;
-                         });
+    return state.runTask(env, info[0], [](const Variant& arg) -> Variant {
+        if (auto nstr = std::get_if<std::string>(&arg)) {
+            state.historyFile = *nstr;
+            write_history(nstr->c_str());
+        }
+        return Undefined;
+    });
 }
 
 static void LogToFile(FILE* f, const Napi::CallbackInfo& info)
