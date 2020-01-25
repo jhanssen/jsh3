@@ -3,7 +3,7 @@ import { jsh3_grammar } from "./parser"
 import { default as Readline, Data as ReadlineData, Completion as ReadlineCompletion } from "../native/readline";
 import { default as Shell } from "../native/shell";
 import { default as Process } from "../native/process";
-import { complete } from "./completion";
+import { complete, cache as completionCache } from "./completion";
 import { readProcess, ReadProcess } from "./process";
 import { runSeparators } from "./subshell";
 import { join as pathJoin } from "path";
@@ -344,6 +344,7 @@ function processCompletion(data: ReadlineCompletion | undefined) {
 function processReadline(data: ReadlineData) {
     switch (data.type) {
     case "lines":
+        completionCache.clear();
         processLines(data.lines);
         break;
     case "completion":
@@ -361,6 +362,7 @@ Readline.readHistory(pathJoin(homedir(), ".jsh_history")).then(() => {
 Process.start();
 
 process.on("SIGINT", () => {
+    completionCache.clear();
     Readline.clear();
 });
 

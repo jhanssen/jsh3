@@ -1,6 +1,7 @@
 import { Completion as ReadlineCompletion } from "../../native/readline";
 import { file } from "./file";
 import { git } from "./git";
+import { cache } from "./cache";
 
 type CompleterFunction = (cmd: string, data: ReadlineCompletion) => Promise<string[]>;
 
@@ -36,3 +37,5 @@ export function complete(data: ReadlineCompletion)
         data.complete([]);
     });
 }
+
+export { cache };

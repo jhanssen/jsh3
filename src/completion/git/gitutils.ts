@@ -1,4 +1,6 @@
 import { execFile } from "child_process";
+import { resolve as pathResolve } from "path";
+import { cache } from "../cache";
 
 const promise = {
     execFile: (file: string, args: string[], options?: { cwd: string }): Promise<{ stdout: string, stderr: string }> => {
@@ -15,9 +17,16 @@ const promise = {
 };
 
 export async function toplevel(path: string): Promise<string | undefined> {
+    const hit = cache.get("gittoplevel");
+    if (hit !== undefined && pathResolve(path).indexOf(hit) === 0) {
+        return hit;
+    }
+
     try {
         const data = await promise.execFile("git", ["rev-parse", "--show-toplevel"], { cwd: path });
-        return data.stdout.trimRight();
+        const top = data.stdout.trimRight();
+        cache.set("gittoplevel", top);
+        return top;
     } catch (e) {
     }
     return undefined;
@@ -167,6 +176,11 @@ export namespace status {
     }
 
     export async function get(path: string): Promise<Status | undefined> {
+        const hit = cache.get("gitstatus", path);
+        if (hit !== undefined) {
+            return hit as Status;
+        }
+
         let data: { stdout: string, stderr: string } | undefined;
         try {
             data = await promise.execFile("git", ["status", "--branch", "-u", "--porcelain=v2"], { cwd: path });
@@ -210,6 +224,9 @@ export namespace status {
                 throw new Error(`Unknown status status ${line[0]}`);
             }
         }
+
+        cache.set("gitstatus", path, ret);
+
         return ret;
     }
 }
@@ -237,6 +254,11 @@ export namespace branch {
     }
 
     export async function get(path: string): Promise<Branches | undefined> {
+        const hit = cache.get("gitbranch", path);
+        if (hit !== undefined) {
+            return hit as Branches;
+        }
+
         let data: { stdout: string, stderr: string } | undefined;
         try {
             data = await promise.execFile("git", ["for-each-ref", "refs/", "--format", "%(refname)%00%(objectname:short)%00%(objecttype)"], { cwd: path });
@@ -272,6 +294,9 @@ export namespace branch {
                 ret.tags.push(parseBranch(br, 10));
             }
         }
+
+        cache.set("gitbranch", path, ret);
+
         return ret;
     }
 }
