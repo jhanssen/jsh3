@@ -192,14 +192,15 @@ value -> key
 
 variableAssignment -> key %eq value
 
+argpart -> (%identifier | %integer) (%eq | %identifier | %integer):* {% extractArgPart %}
+
 exe -> %identifier
      | %integer
      | %variable
      | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
      | singlestring
      | doublestring
-arg -> %identifier
-     | %integer
+arg -> argpart
      | singlestring
      | doublestring
      | js
@@ -207,8 +208,7 @@ arg -> %identifier
      | subshellout
      | %variable
      | %dollarvariable %variable %dollarvariableend {% extractDollarVariable %}
-argnojs -> %identifier
-         | %integer
+argnojs -> argpart
          | singlestring
          | doublestring
          | subshell
@@ -224,6 +224,19 @@ function extract1(d: any) {
 
 function extractDollarVariable(d: any) {
     return d[1];
+}
+
+function extractArgPart(d: any) {
+    const newd0 = [Object.assign({}, d[0][0])];
+    if (d[1] instanceof Array && d[1].length > 0) {
+        // join all the items
+        let str = newd0[0].text;
+        for (const item of d[1]) {
+            str += item[0].text
+        }
+        newd0[0].text = newd0[0].value = str;
+    }
+    return [newd0];
 }
 
 function extractJSCode(d: any) {
