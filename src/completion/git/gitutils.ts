@@ -1,5 +1,4 @@
 import { execFile } from "child_process";
-import { resolve as pathResolve } from "path";
 import { cache } from "../cache";
 
 const promise = {
@@ -17,15 +16,9 @@ const promise = {
 };
 
 export async function toplevel(path: string): Promise<string | undefined> {
-    const hit = cache.get("gittoplevel");
-    if (hit !== undefined && pathResolve(path).indexOf(hit) === 0) {
-        return hit;
-    }
-
     try {
         const data = await promise.execFile("git", ["rev-parse", "--show-toplevel"], { cwd: path });
         const top = data.stdout.trimRight();
-        cache.set("gittoplevel", top);
         return top;
     } catch (e) {
     }

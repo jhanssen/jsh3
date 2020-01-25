@@ -19,6 +19,7 @@ async function addcmd(input: string[]): Promise<string[]> {
 
     // console.log("wull", dir, file, last);
 
+    /*
     const top = await toplevel(dir || ".");
     if (top === undefined) {
         // not a git repo?
@@ -31,6 +32,7 @@ async function addcmd(input: string[]): Promise<string[]> {
     if (cwd.indexOf(top) !== 0) {
         return [];
     }
+    */
 
     // complete on stuff from status directly
     const st = await status.get(dir || ".");
