@@ -213,3 +213,65 @@ export namespace status {
         return ret;
     }
 }
+
+export namespace branch {
+    export interface Branch {
+        refname: string;
+        objectname: string;
+        objecttype: string;
+    };
+
+    export interface Branches {
+        heads?: Branch[],
+        remotes?: Branch[],
+        tags?: Branch[]
+    }
+
+    function parseBranch(line: string[], skip: number) {
+        const ret: Branch = {
+            refname: line[0].substr(skip),
+            objectname: line[1],
+            objecttype: line[2]
+        };
+        return ret;
+    }
+
+    export async function get(path: string): Promise<Branches | undefined> {
+        let data: { stdout: string, stderr: string } | undefined;
+        try {
+            data = await promise.execFile("git", ["for-each-ref", "refs/", "--format", "%(refname)%00%(objectname:short)%00%(objecttype)"], { cwd: path });
+        } catch (err) {
+        }
+        if (data === undefined) {
+            return undefined;
+        }
+        const status = data.stdout.split('\n');
+        if (status.length === 0) {
+            return {};
+        }
+        const ret: Branches = {};
+        for (const line of status) {
+            const br = line.split('\0');
+            if (br.length === 0) {
+                continue;
+            }
+            if (br[0].startsWith("refs/heads/")) {
+                if (ret.heads === undefined) {
+                    ret.heads = [];
+                }
+                ret.heads.push(parseBranch(br, 11));
+            } else if (br[0].startsWith("refs/remotes/")) {
+                if (ret.remotes === undefined) {
+                    ret.remotes = [];
+                }
+                ret.remotes.push(parseBranch(br, 13));
+            } else if (br[0].startsWith("refs/tags/")) {
+                if (ret.tags === undefined) {
+                    ret.tags = [];
+                }
+                ret.tags.push(parseBranch(br, 10));
+            }
+        }
+        return ret;
+    }
+}

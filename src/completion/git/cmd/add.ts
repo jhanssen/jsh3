@@ -4,7 +4,7 @@ import { expand as expandFile } from "../../file";
 import { filterPath } from "../../simple";
 import { isDirectory, basename, dirname } from "../../../utils";
 
-async function add(input: string[]): Promise<string[]> {
+async function addcmd(input: string[]): Promise<string[]> {
     const last = input[input.length - 1];
     const lastempty = last.length === 0;
     const isdir = lastempty ? false : await isDirectory(last);
@@ -66,4 +66,4 @@ async function add(input: string[]): Promise<string[]> {
     return filterPath(candidates, file, dir);
 }
 
-export default <GitCompletion>add;
+export default <GitCompletion>addcmd;
