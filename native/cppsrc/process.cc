@@ -119,7 +119,6 @@ struct Reader
     int wakeuppipe[2];
     bool stopped { true };
 
-    static void handleSignal(int sig);
     void handleSigChld();
 
     void start(const Napi::Env& env);
@@ -136,6 +135,8 @@ struct State
     std::vector<int> closeme;
 
     void removeFD(int fd);
+
+    uv_signal_t chld;
 };
 
 void State::removeFD(int fd)
@@ -266,7 +267,12 @@ void Reader::start(const Napi::Env& env)
     }
     fcntl(wakeuppipe[0], F_SETFL, r | O_NONBLOCK);
 
-    signal(SIGCHLD, handleSignal);
+    uv_signal_init(uv_default_loop(), &state.chld);
+    uv_signal_start(&state.chld, [](uv_signal_t*, int sig) {
+        int e;
+        unsigned char csig = sig;
+        EINTRWRAP(e, ::write(reader.sigpipe[1], &csig, 1));
+    }, SIGCHLD);
 
     uv_async_init(uv_default_loop(), &async,
                   [](uv_async_t*) {
@@ -474,7 +480,7 @@ void Reader::stop(const Napi::Env& env)
 
     uv_close(reinterpret_cast<uv_handle_t*>(&reader.async), nullptr);
 
-    signal(SIGCHLD, SIG_DFL);
+    uv_signal_stop(&state.chld);
 }
 
 void Reader::handleSigChld()
@@ -501,13 +507,6 @@ void Reader::handleSigChld()
             }
         }
     }
-}
-
-void Reader::handleSignal(int sig)
-{
-    int e;
-    unsigned char csig = sig;
-    EINTRWRAP(e, ::write(reader.sigpipe[1], &csig, 1));
 }
 
 void Write(const Napi::CallbackInfo& info)
