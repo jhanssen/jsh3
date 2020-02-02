@@ -528,6 +528,9 @@ process.on("unhandledRejection", (reason, promise) => {
                     status: undefined,
                     stdout: undefined
                 };
+            },
+            setPrompt: (prompt: string) => {
+                Readline.setPrompt(prompt);
             }
         };
         await loadConfig(configDir, api);
