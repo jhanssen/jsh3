@@ -137,7 +137,7 @@ async function runJSNode(node: any, line: string, mode: RunMode): Promise<RunRes
             const status = await data.promise;
             return {
                 status: status,
-                stdout: Buffer.concat(bufs)
+                stdout: bufs.length === 0 ? undefined : Buffer.concat(bufs)
             } as SubshellResult;
         } catch (e) {
             console.error(e);
