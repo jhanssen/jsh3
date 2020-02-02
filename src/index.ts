@@ -86,11 +86,19 @@ async function runSepNode(node: any, line: string, mode: RunMode) {
     let data: RunResult;
     if (mode === RunMode.RunNormal) {
         await Readline.pause();
-        data = await runSeparators(node, line);
+        try {
+            data = await runSeparators(node, line);
+        } catch (e) {
+            console.error(e);
+        }
         Shell.restore();
         await Readline.resume();
     } else {
-        data = await runSubshell(node, line);
+        try {
+            data = await runSubshell(node, line);
+        } catch (e) {
+            console.error(e);
+        }
     }
     return data;
 }
@@ -105,21 +113,31 @@ async function runCmdNode(node: any, line: string, mode: RunMode): Promise<RunRe
 
 async function runJSNode(node: any, line: string, mode: RunMode): Promise<RunResult> {
     if (mode === RunMode.RunNormal) {
-        const data = await runJS(node, line, { redirectStdin: false, redirectStdout: false });
-        return await data.promise;
-    } else {
-        const data = await runJS(node, line, { redirectStdin: false, redirectStdout: true });
-        const bufs = [];
-        if (data.stdout !== undefined) {
-            for await (const buf of data.stdout) {
-                bufs.push(buf);
-            }
+        try {
+            const data = await runJS(node, line, { redirectStdin: false, redirectStdout: false });
+            return await data.promise;
+        } catch (e) {
+            console.error(e);
+            return undefined;
         }
-        const status = await data.promise;
-        return {
-            status: status,
-            stdout: Buffer.concat(bufs)
-        } as SubshellResult;
+    } else {
+        try {
+            const data = await runJS(node, line, { redirectStdin: false, redirectStdout: true });
+            const bufs = [];
+            if (data.stdout !== undefined) {
+                for await (const buf of data.stdout) {
+                    bufs.push(buf);
+                }
+            }
+            const status = await data.promise;
+            return {
+                status: status,
+                stdout: Buffer.concat(bufs)
+            } as SubshellResult;
+        } catch (e) {
+            console.error(e);
+            return undefined;
+        }
     }
 }
 
