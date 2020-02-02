@@ -113,13 +113,18 @@ async function runCmdNode(node: any, line: string, mode: RunMode): Promise<RunRe
 
 async function runJSNode(node: any, line: string, mode: RunMode): Promise<RunResult> {
     if (mode === RunMode.RunNormal) {
+        let ret: RunResult;
+        await Readline.pause();
         try {
             const data = await runJS(node, line, { redirectStdin: false, redirectStdout: false });
-            return await data.promise;
+            ret = await data.promise;
         } catch (e) {
             console.error(e);
             return undefined;
         }
+        Shell.restore();
+        await Readline.resume();
+        return ret;
     } else {
         try {
             const data = await runJS(node, line, { redirectStdin: false, redirectStdout: true });
