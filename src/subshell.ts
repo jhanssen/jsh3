@@ -17,7 +17,7 @@ interface CmdResult
     promise: Promise<number | undefined>;
 }
 
-async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<{ pid: number, result: CmdResult }> {
+export async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<{ pid: number, result: CmdResult }> {
     envPush();
 
     try {
@@ -152,11 +152,10 @@ class Pipe
                 });
                 break;
             case "jscode":
-                all.push(await runJS(
-                    p, this._source,
-                    source !== undefined || i > 0,
-                    i < pnum - 1 || finalDestination !== undefined
-                ));
+                all.push(await runJS(p, this._source, {
+                    redirectStdin: source !== undefined || i > 0,
+                    redirectStdout: i < pnum - 1 || finalDestination !== undefined
+                }));
                 break;
             }
         }
@@ -463,7 +462,12 @@ interface Global
     [key: string]: any;
 }
 
-export async function runJS(js: any, source: string, redirectStdin: boolean, redirectStdout: boolean): Promise<CmdResult> {
+interface JSOptions {
+    redirectStdin: boolean;
+    redirectStdout: boolean;
+}
+
+export async function runJS(js: any, source: string, opts: JSOptions): Promise<CmdResult> {
     const jscode = source.substr(js.start + 1, js.end - js.start - 1).replace(/"/g, '\\"').replace(/\\n/g, "\\\\n");
     let jswrap: string | undefined;
     let args: string[] | undefined;
@@ -535,7 +539,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                 jstdout.end();
             });
 
-            if (redirectStdout) {
+            if (opts.redirectStdout) {
                 stdout = jstdout;
             } else {
                 jstdout.pipe(process.stdout);
@@ -552,7 +556,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                 ctxin.end();
             })();
 
-            if (redirectStdin) {
+            if (opts.redirectStdin) {
                 stdin = jstdin;
             } else {
                 jstdin.end();
@@ -623,7 +627,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                 (ctx.stderr as ShellWriter).removeAllListeners();
             });
 
-            if (redirectStdout) {
+            if (opts.redirectStdout) {
                 stdout = jstdout;
             } else {
                 jstdout.pipe(process.stdout);
@@ -640,7 +644,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                 ctxin.end();
             })();
 
-            if (redirectStdin) {
+            if (opts.redirectStdin) {
                 stdin = jstdin;
             } else {
                 jstdin.end();
@@ -715,7 +719,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                 (ctx.stderr as ShellWriter).removeAllListeners();
             });
 
-            if (redirectStdout) {
+            if (opts.redirectStdout) {
                 stdout = jstdout;
             } else {
                 jstdout.pipe(process.stdout);
@@ -732,7 +736,7 @@ export async function runJS(js: any, source: string, redirectStdin: boolean, red
                 ctxin.end();
             })();
 
-            if (redirectStdin) {
+            if (opts.redirectStdin) {
                 stdin = jstdin;
             } else {
                 jstdin.end();

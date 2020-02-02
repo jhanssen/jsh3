@@ -22,7 +22,7 @@ export async function expand(value: any, source: string): Promise<string> {
             return ((await runSubshell(value, source)).stdout || "").toString().trimRight();
         case "jscode":
             if (value.capture === "out") {
-                const js = await runJS(value, source, false, true); // redirectStdin = false, redirectStdout = true
+                const js = await runJS(value, source, { redirectStdin: false, redirectStdout: true });
                 let ret = "";
                 if (js.stdout) {
                     for await (const data of js.stdout) {
@@ -31,7 +31,7 @@ export async function expand(value: any, source: string): Promise<string> {
                 }
                 return ret.trimRight();
             } else if (value.capture === "exit") {
-                const js = await runJS(value, source, false, false); // redirectStdin = false, redirectStdout = false
+                const js = await runJS(value, source, { redirectStdin: false, redirectStdout: false });
                 let status: number | undefined;
                 if (js.promise) {
                     status = await js.promise;
