@@ -5,13 +5,46 @@ import { default as Shell } from "../native/shell";
 import { default as Process } from "../native/process";
 import { complete, cache as completionCache } from "./completion";
 import { readProcess, ReadProcess } from "./process";
-import { runSeparators } from "./subshell";
+import { runSeparators, runSubshell, SubshellResult } from "./subshell";
+import { EnvType, top as envTop } from "./variable";
+import { API } from "./api";
 import { join as pathJoin } from "path";
 import { stat } from "fs";
 import { homedir } from "os";
 import { runInNewContext } from "vm";
+import { default as Options } from "@jhanssen/options";
+import * as xdgBaseDir from "xdg-basedir";
 
 const jsh3Parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
+
+const options = Options("jsh");
+
+function stringOption(key: string): string | undefined
+{
+    const value = options(key);
+    if (typeof value === "string") {
+        return value;
+    }
+    return undefined;
+}
+
+async function loadConfig(dir: string, api: API)
+{
+    try {
+        const cfg = await import(pathJoin(dir, "jsh"));
+        cfg.default(api, options);
+    } catch (err) {
+        if (err.code !== "MODULE_NOT_FOUND") {
+            throw err;
+        }
+    }
+}
+
+const configDir = stringOption("config") || xdgBaseDir.config;
+if (configDir === undefined) {
+    console.error("no config dir");
+    process.exit();
+}
 
 //jsh3Parser.feed("./hello world { return `${foobar}`; } | grep 'ting'");
 //jsh3Parser.feed("./hello \"world \\\"f\" 'trilli' | foo bar baz { 'foo!%&\\'bar' }");
@@ -373,3 +406,22 @@ process.on("uncaughtException", err => {
 process.on("unhandledRejection", (reason, promise) => {
     console.error("Unhandled rejection at", promise, "reason", reason);
 });
+
+(async function() {
+    if (configDir !== undefined) {
+        const api = {
+            declare: (name: string, func: (args: string[], env: EnvType) => Promise<number | undefined>): void => {
+            },
+            export: (name: string, value: string | undefined): void => {
+                envTop()[name] = value;
+            },
+            run: async (cmdline: string): Promise<SubshellResult> => {
+                return {
+                    status: undefined,
+                    stdout: undefined
+                };
+            }
+        };
+        await loadConfig(configDir, api);
+    }
+})();
