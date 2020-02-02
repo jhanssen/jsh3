@@ -55,10 +55,6 @@ if (configDir === undefined) {
 //jsh3Parser.feed("./hello 1 2 | foo 3 4");
 //console.log(JSON.stringify(jsh3Parser.results, null, 4));
 
-const uid = Process.uid();
-const gids = Process.gids();
-const env: {[key: string]: string | undefined} = Object.assign({}, process.env);
-
 function handlePauseRl(cmd: string, args: string[]) {
     const timeout = (args.length > 0 && parseInt(args[0])) || 0;
     if (!timeout) {
