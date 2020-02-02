@@ -515,6 +515,15 @@ process.on("unhandledRejection", (reason, promise) => {
                 envTop()[name] = value;
             },
             run: async (cmdline: string): Promise<SubshellResult> => {
+                const parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
+                parser.feed(cmdline);
+                if (parser.results) {
+                    const data = await runASTNode(parser.results, cmdline, RunMode.RunSubshell);
+                    if (data !== undefined) {
+                        assert(typeof data !== "number");
+                        return data;
+                    }
+                }
                 return {
                     status: undefined,
                     stdout: undefined
