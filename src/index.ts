@@ -83,236 +83,6 @@ function handlePauseRl(cmd: string, args: string[]) {
     });
 }
 
-function runProcessToCompletion(args: string[]): Promise<ReadProcess> {
-    return new Promise((resolve, reject) => {
-        const cmd = args.shift();
-        if (!cmd) {
-            reject("No command");
-            return;
-        }
-        handleInternalCmd(cmd, args).then(arg => {
-            resolve({ status: 0, stdout: arg || Buffer.alloc(0), stderr: undefined });
-        }).catch(() => {
-            pathify(cmd).then(acmd => {
-                readProcess(acmd, args).then(out => {
-                    resolve(out);
-                }).catch(e => {
-                    reject(e);
-                });
-            }).catch(e => { reject(e); });
-        });
-    });
-}
-
-function expandVariable(value: any) {
-    return env[value.value] || "";
-}
-
-function expandCmdStdout(value: any): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const ps = [];
-        for (const id of value.cmd) {
-            ps.push(expand(id));
-        }
-        Promise.all(ps).then(args => {
-            runProcessToCompletion(args).then(out => {
-                resolve((out.stdout || "").toString().trimEnd());
-            });
-        }).catch(e => { reject(e); });
-    });
-}
-
-function expandCmdStatus(value: any): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const ps = [];
-        for (const id of value.cmd) {
-            ps.push(expand(id));
-        }
-        Promise.all(ps).then(args => {
-            runProcessToCompletion(args).then(out => {
-                resolve((out.status || -1).toString());
-            });
-        }).catch(e => { reject(e); });
-    });
-}
-
-function expand(value: any): Promise<string> {
-    return new Promise((resolve, reject) => {
-        if (typeof value === "object" && "type" in value) {
-            if (value.type === "variable") {
-                resolve(expandVariable(value));
-            } else if (value.type === "subshell" || value.type === "subshellOut") {
-                //resolve(subshell(value));
-                resolve(value);
-            } else if (value.value !== undefined) {
-                resolve(value.value.toString());
-            } else {
-                resolve(value);
-            }
-        }
-        if (value instanceof Array) {
-            const ps = [];
-            for (const sub of value) {
-                ps.push(expand(sub));
-            }
-            Promise.all(ps).then(results => { resolve(results.join("")); }).catch(e => { reject(e); });
-        } else {
-            resolve(value);
-        }
-    });
-}
-
-function handleInternalCmd(cmd: string, args: string[]): Promise<Buffer | undefined> {
-    return new Promise((resolve, reject) => {
-        switch (cmd) {
-        case "pauserl":
-            handlePauseRl(cmd, args);
-            resolve();
-            break;
-        case "exit":
-            Process.stop();
-            Readline.stop();
-            process.exit();
-            resolve();
-            break;
-        case "export":
-            if (args.length < 2) {
-                resolve(Buffer.from("export needs at least two arguments"));
-                return true;
-            }
-            env[args[0]] = args[1];
-            resolve();
-            break;
-        default:
-            reject();
-            break;
-        }
-    });
-}
-
-function pathify(cmd: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-        if (cmd.includes("/")) {
-            resolve(cmd);
-            return;
-        }
-        const paths = (env.PATH || "").split(":");
-
-        let num = 0;
-        const reject1 = () => {
-            if (++num === paths.length) {
-                reject(`File not found ${cmd}`);
-            }
-        };
-
-        for (const p of paths) {
-            // should maybe do these sequentially in order to avoid races
-            const j = pathJoin(p, cmd);
-            stat(j, (err, stats) => {
-                if (err || !stats) {
-                    reject1();
-                    return;
-                }
-                if (stats.isFile()) {
-                    if ((uid === stats.uid && stats.mode & 0o500)
-                        || (gids.includes(stats.gid) && stats.mode & 0o050)
-                        || (stats.mode & 0o005)) {
-                        resolve(j);
-                    } else {
-                        reject1();
-                    }
-                } else {
-                    reject1();
-                }
-            });
-        }
-    });
-}
-
-// function visitCmd(node: any) {
-//     const ps = [];
-//     for (const id of node.cmd) {
-//         ps.push(expand(id));
-//     }
-//     Promise.all(ps).then(args => {
-//         //console.log("cmmmmd", args);
-//         const cmd = args.shift();
-//         if (!cmd)
-//             return;
-//         handleInternalCmd(cmd, args).then(arg => {
-//             console.log((arg && arg.toString()) || "");
-//         }).catch(() => {
-//             pathify(cmd).then(acmd => {
-//                 readProcess(acmd, args).then(out => {
-//                     console.log((out.stdout || "").toString());
-//                 }).catch(e => {
-//                     console.error(e);
-//                 });
-//             }).catch(e => {
-//                 console.error(e);
-//             });
-//         });
-//     }).catch(e => {
-//         console.error(e);
-//     });
-//     //console.log(args);
-//     return true;
-// }
-
-// function visitIf(node: any, line: string) {
-//     visit(node.if, line);
-//     if (node.elif) {
-//         visit(node.elif, line);
-//     }
-//     if (node.else) {
-//         visit(node.else, line);
-//     }
-//     return true;
-// }
-
-// function runJS(code: string, args?: string[]) {
-//     const ctx = {
-//         args: args || []
-//     };
-//     return runInNewContext(code, ctx);
-// }
-
-// function visitJS(node: any, line: string) {
-//     const jscode = line.substr(node.start + 1, node.end - node.start - 1);
-//     // resolve arguments if any
-//     if (node.args instanceof Array) {
-//         const ps: Promise<string>[] = [];
-//         for (const arg of node.args) {
-//             ps.push(expand(arg));
-//         }
-//         Promise.all(ps).then(args => {
-//             const r = runJS(jscode, args);
-//             console.log(r);
-//         }).catch(e => {
-//             console.error(e);
-//         });
-//     } else {
-//         const r = runJS(jscode);
-//         console.log(r);
-//     }
-// }
-
-// function visitSep(node: any, line: string) {
-//     Readline.pause().then(() => {
-//         runSeparators(node, line).then(arg => {
-//             Shell.restore();
-//             Readline.resume().then(() => {
-//                 console.log("done sep", arg);
-//             });
-//         }).catch(e => {
-//             Shell.restore();
-//             Readline.resume().then(() => {
-//                 console.error(e);
-//             });
-//         });
-//     });
-// }
-
 enum RunMode { RunNormal, RunSubshell };
 type RunResult = number | SubshellResult | undefined;
 
@@ -378,8 +148,7 @@ async function runASTNode(node: any, line: string, mode: RunMode): Promise<RunRe
             return;
         if (mode === RunMode.RunSubshell) {
             assert(typeof result === "object");
-            if (typeof newresult === "number")
-                throw new Error(`Got number result for RunSubshell`);
+            assert(typeof newresult !== "number");
             result.status = newresult.status;
             if (result.stdout === undefined) {
                 result.stdout = newresult.stdout;
@@ -387,8 +156,7 @@ async function runASTNode(node: any, line: string, mode: RunMode): Promise<RunRe
                 result.stdout = Buffer.concat([result.stdout, newresult.stdout]);
             }
         } else {
-            if (typeof newresult !== "number")
-                throw new Error(`Got non-number result for RunNormal`);
+            assert(typeof newresult === "number");
             result = newresult;
         }
     };
@@ -410,39 +178,6 @@ async function runASTNode(node: any, line: string, mode: RunMode): Promise<RunRe
         throw new Error(`Unknown AST type ${node.type}`);
     }
 }
-
-// function visit(node: any, line: string) {
-//     if (node instanceof Array) {
-//         for (const item of node) {
-//             visit(item, line);
-//         }
-//         return;
-//     }
-
-//     switch (node.type) {
-//     case "sep":
-//         visitSep(node, line);
-//         return;
-//     case "cmd":
-//         if (visitCmd(node))
-//             return;
-//         break;
-//     case "jscode":
-//         visitJS(node, line);
-//         return;
-//     case "if":
-//         if (visitIf(node, line))
-//             return;
-//         break;
-//     }
-
-//     const data = node[node.type];
-//     if (data instanceof Array) {
-//         for (const item of data) {
-//             visit(item, line);
-//         }
-//     }
-// }
 
 function processLines(lines: string[] | undefined) {
     if (!lines)
@@ -467,9 +202,6 @@ function processLines(lines: string[] | undefined) {
 function processCompletion(data: ReadlineCompletion | undefined) {
     if (data === undefined)
         return;
-
-    //console.log("want to complete", data);
-    //data.complete(["faff"]);
     complete(data);
 }
 
@@ -507,32 +239,31 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 (async function() {
-    if (configDir !== undefined) {
-        const api = {
-            declare: (name: string, func: (args: string[], env: EnvType) => Promise<number | undefined>): void => {
-            },
-            export: (name: string, value: string | undefined): void => {
-                envTop()[name] = value;
-            },
-            run: async (cmdline: string): Promise<SubshellResult> => {
-                const parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
-                parser.feed(cmdline);
-                if (parser.results) {
-                    const data = await runASTNode(parser.results, cmdline, RunMode.RunSubshell);
-                    if (data !== undefined) {
-                        assert(typeof data !== "number");
-                        return data;
-                    }
+    assert(configDir !== undefined);
+    const api = {
+        declare: (name: string, func: (args: string[], env: EnvType) => Promise<number | undefined>): void => {
+        },
+        export: (name: string, value: string | undefined): void => {
+            envTop()[name] = value;
+        },
+        run: async (cmdline: string): Promise<SubshellResult> => {
+            const parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
+            parser.feed(cmdline);
+            if (parser.results) {
+                const data = await runASTNode(parser.results, cmdline, RunMode.RunSubshell);
+                if (data !== undefined) {
+                    assert(typeof data !== "number");
+                    return data;
                 }
-                return {
-                    status: undefined,
-                    stdout: undefined
-                };
-            },
-            setPrompt: async (prompt: string): Promise<void> => {
-                return Readline.setPrompt(prompt);
             }
-        };
-        await loadConfig(configDir, api);
-    }
+            return {
+                status: undefined,
+                stdout: undefined
+            };
+        },
+        setPrompt: async (prompt: string): Promise<void> => {
+            return Readline.setPrompt(prompt);
+        }
+    };
+    await loadConfig(configDir, api);
 })();
