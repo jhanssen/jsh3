@@ -529,8 +529,8 @@ process.on("unhandledRejection", (reason, promise) => {
                     stdout: undefined
                 };
             },
-            setPrompt: (prompt: string) => {
-                Readline.setPrompt(prompt);
+            setPrompt: async (prompt: string): Promise<void> => {
+                return Readline.setPrompt(prompt);
             }
         };
         await loadConfig(configDir, api);
