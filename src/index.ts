@@ -263,45 +263,6 @@ async function runIfNode(node: any, line: string, mode: RunMode): Promise<RunRes
     return undefined;
 }
 
-async function runCmdNode(node: any, line: string, mode: RunMode): Promise<RunResult> {
-    return undefined;
-}
-
-async function runJSNode(node: any, line: string, mode: RunMode): Promise<RunResult> {
-    if (mode === RunMode.RunNormal) {
-        let ret: RunResult;
-        await Readline.pause();
-        try {
-            const data = await runJS(node, line, { redirectStdin: false, redirectStdout: false });
-            ret = await data.status;
-        } catch (e) {
-            console.error(e);
-            return undefined;
-        }
-        Shell.restore();
-        await Readline.resume();
-        return ret;
-    } else {
-        try {
-            const data = await runJS(node, line, { redirectStdin: false, redirectStdout: true });
-            const bufs = [];
-            if (data.stdout !== undefined) {
-                for await (const buf of data.stdout) {
-                    bufs.push(buf);
-                }
-            }
-            const status = await data.status;
-            return {
-                status: status,
-                stdout: bufs.length === 0 ? undefined : Buffer.concat(bufs)
-            } as SubshellResult;
-        } catch (e) {
-            console.error(e);
-            return undefined;
-        }
-    }
-}
-
 async function runASTNode(node: any, line: string, mode: RunMode): Promise<RunResult> {
     if (node instanceof Array) {
         for (const item of node) {
@@ -342,12 +303,6 @@ async function runASTNode(node: any, line: string, mode: RunMode): Promise<RunRe
         break;
     case "if":
         append(await runIfNode(node, line, mode));
-        break;
-    case "cmd":
-        append(await runCmdNode(node, line, mode));
-        break;
-    case "jscode":
-        append(await runJSNode(node, line, mode));
         break;
     default:
         throw new Error(`Unknown AST type ${node.type}`);
