@@ -3,7 +3,7 @@ import { Readable, Writable, Duplex } from "stream";
 import { pathify } from "./utils";
 import { expand } from "./expand";
 import { env as envGet, push as envPush, pop as envPop, EnvType } from "./variable";
-import { declaredCommands, builtinCommands } from "./commands";
+import { declaredCommands, builtinCommands, CommandFunction } from "./commands";
 import { parseRedirections } from "./redirs";
 import { assert } from "./assert";
 import { runInNewContext } from "vm";
@@ -20,7 +20,7 @@ export interface CmdResult
 
 type GeneratorResolveFunction = (value: number | undefined | PromiseLike<number | undefined>) => void;
 
-function runGeneratorCommand(generator: AsyncIterable<Buffer | string | number>): CmdResult {
+function runGeneratorCommand(command: CommandFunction, args: string[], env: EnvType, opts: ProcessOptions): CmdResult {
     let resolve: GeneratorResolveFunction | undefined;
     let reject: RejectFunction | undefined;
     const promise = new Promise<number | undefined>((newResolve, newReject) => {
@@ -29,7 +29,27 @@ function runGeneratorCommand(generator: AsyncIterable<Buffer | string | number>)
     });
     assert(resolve !== undefined && reject !== undefined);
 
-    const stdout = new ShellReader();
+    let stdout = new ShellReader();
+    if (!opts.redirectStdout) {
+        stdout.pipe(process.stdout);
+    }
+    let stdin: ShellWriter | undefined;
+    let stdinPipe: ShellReader | undefined;
+    if (opts.redirectStdin) {
+        stdin = new ShellWriter();
+        stdinPipe = new ShellReader();
+    }
+
+    const generator = command(args, env, stdinPipe);
+
+    if (stdin && stdinPipe) {
+        (async () => {
+            for await (const buf of stdin) {
+                stdinPipe.write(buf);
+            }
+            stdinPipe.end();
+        })();
+    }
 
     (async () => {
         let status: number | undefined;
@@ -76,8 +96,8 @@ function runGeneratorCommand(generator: AsyncIterable<Buffer | string | number>)
     })();
 
     return {
-        stdin: undefined,
-        stdout: stdout,
+        stdin: stdin,
+        stdout: opts.redirectStdout ? stdout : undefined,
         status: promise
     };
 }
@@ -110,11 +130,11 @@ export async function runCmd(cmds: any, source: string, opts: ProcessOptions): P
 
         if (cmd in declaredCommands.commands) {
             const declared = declaredCommands.commands[cmd];
-            return { pid: -1, result: runGeneratorCommand(declared(args, env)) };
+            return { pid: -1, result: runGeneratorCommand(declared, args, env, opts) };
         }
         if (cmd in builtinCommands) {
             const builtin = builtinCommands[cmd as keyof typeof builtinCommands];
-            return { pid: -1, result: runGeneratorCommand(builtin(args, env)) };
+            return { pid: -1, result: runGeneratorCommand(builtin, args, env, opts) };
         }
 
         const rcmd = await pathify(cmd);

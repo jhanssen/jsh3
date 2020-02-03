@@ -9,7 +9,7 @@ import { runSeparators, runSubshell, runCmd, runJS, SubshellResult, CmdResult } 
 import { EnvType, top as envTop } from "./variable";
 import { API } from "./api";
 import { assert } from "./assert";
-import { declaredCommands, DeclaredFunction } from "./commands";
+import { declaredCommands, CommandFunction } from "./commands";
 import { join as pathJoin } from "path";
 import { stat } from "fs";
 import { homedir } from "os";
@@ -372,7 +372,7 @@ process.on("unhandledRejection", (reason, promise) => {
 (async function() {
     assert(configDir !== undefined);
     const api = {
-        declare: (name: string, func?: DeclaredFunction): void => {
+        declare: (name: string, func?: CommandFunction): void => {
             if (func === undefined) {
                 declaredCommands.remove(name);
             } else {
