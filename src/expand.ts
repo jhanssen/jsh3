@@ -33,8 +33,8 @@ export async function expand(value: any, source: string): Promise<string> {
             } else if (value.capture === "exit") {
                 const js = await runJS(value, source, { redirectStdin: false, redirectStdout: false });
                 let status: number | undefined;
-                if (js.promise) {
-                    status = await js.promise;
+                if (js.status) {
+                    status = await js.status;
                 }
                 return (status || 0).toString();
             } else {

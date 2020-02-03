@@ -10,11 +10,11 @@ import { format as consoleFormat } from "util";
 
 type VoidFunction = () => void;
 
-interface CmdResult
+export interface CmdResult
 {
     stdin: Writable | undefined;
     stdout: Readable | undefined;
-    promise: Promise<number | undefined>;
+    status: Promise<number | undefined>;
 }
 
 export async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<{ pid: number, result: CmdResult }> {
@@ -50,7 +50,7 @@ export async function runCmd(cmds: any, source: string, opts: ProcessOptions): P
                 result: {
                     stdin: undefined,
                     stdout: undefined,
-                    promise: internalCmd(args, env)
+                    status: internalCmd(args, env)
                 }
             };
         }
@@ -65,7 +65,7 @@ export async function runCmd(cmds: any, source: string, opts: ProcessOptions): P
             result: {
                 stdin: opts.redirectStdin ? proc.stdin : undefined,
                 stdout: opts.redirectStdout ? proc.stdout : undefined,
-                promise: proc.status
+                status: proc.status
             }
         };
     } catch (e) {
@@ -148,7 +148,7 @@ class Pipe
                 all.push({
                     stdout: subopts.readable,
                     stdin: subopts.writable,
-                    promise: subshell(p, this._source, subopts)
+                    status: subshell(p, this._source, subopts)
                 });
                 break;
             case "jscode":
@@ -196,7 +196,7 @@ class Pipe
                     throw new Error("No finalDestination but have stdout");
                 }
             }
-            promises.push(a.promise);
+            promises.push(a.status);
         }
 
         const results = await Promise.all(promises);
@@ -824,7 +824,7 @@ export async function runJS(js: any, source: string, opts: JSOptions): Promise<C
     return {
         stdin: stdin,
         stdout: stdout,
-        promise: status
+        status: status
     };
 }
 

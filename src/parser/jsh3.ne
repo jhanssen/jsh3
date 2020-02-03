@@ -343,7 +343,7 @@ function extractIf(d: any) {
     }
     let elseentries: any[] | undefined = undefined;
     if (d[10] instanceof Array && d[10].length > 0) {
-        elseentries = d[10][3][0];
+        elseentries = d[10][3];
     }
 
     return { type: "if", if: ifentries, elif: elifentries, else: elseentries, redirs: d[11] };

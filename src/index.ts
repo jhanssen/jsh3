@@ -5,7 +5,7 @@ import { default as Shell } from "../native/shell";
 import { default as Process } from "../native/process";
 import { complete, cache as completionCache } from "./completion";
 import { readProcess, ReadProcess } from "./process";
-import { runSeparators, runSubshell, runCmd, runJS, SubshellResult } from "./subshell";
+import { runSeparators, runSubshell, runCmd, runJS, SubshellResult, CmdResult } from "./subshell";
 import { EnvType, top as envTop } from "./variable";
 import { API } from "./api";
 import { assert } from "./assert";
@@ -103,7 +103,163 @@ async function runSepNode(node: any, line: string, mode: RunMode) {
     return data;
 }
 
+async function runConditionCommand(node: any, line: string, mode: RunMode): Promise<number | undefined> {
+    const redirectStdout = mode === RunMode.RunSubshell;
+    switch (node.type) {
+    case "cmd": {
+        const data = await runCmd(node, line, { redirectStdin: false, redirectStdout: redirectStdout, redirectStderr: false, interactive: undefined });
+        return await data.result.status; }
+    case "jscode": {
+        const data = await runJS(node, line, { redirectStdin: false, redirectStdout: redirectStdout });
+        return await data.status; }
+    case "subshell":
+    case "subshellOut": {
+        const data = await runSubshell(node, line);
+        return await data.status };
+    default:
+        throw new Error(`Can't run command of type ${node.type}`);
+    }
+}
+
+async function runCommand(node: any, line: string, mode: RunMode): Promise<RunResult> {
+    const redirectStdout = mode === RunMode.RunSubshell;
+
+    const createReturnValue = async (data: CmdResult | SubshellResult) => {
+        if (redirectStdout) {
+            const bufs: Buffer[] = [];
+            if (data.stdout) {
+                if (data.stdout instanceof Buffer) {
+                    bufs.push(data.stdout);
+                } else {
+                    for await (const buf of data.stdout) {
+                        bufs.push(buf);
+                    }
+                }
+            }
+            return {
+                stdout: bufs.length === 0 ? undefined : Buffer.concat(bufs),
+                status: await data.status
+            } as SubshellResult;
+        }
+        return await data.status;
+    }
+
+    switch (node.type) {
+    case "cmd": {
+        const data = await runCmd(node, line, { redirectStdin: false, redirectStdout: redirectStdout, redirectStderr: false, interactive: undefined });
+        return await createReturnValue(data.result); }
+    case "jscode": {
+        const data = await runJS(node, line, { redirectStdin: false, redirectStdout: redirectStdout });
+        return await createReturnValue(data); }
+    case "subshell":
+    case "subshellOut": {
+        const data = await runSubshell(node, line);
+        return await createReturnValue(data); }
+    default:
+        throw new Error(`Can't run command of type ${node.type}`);
+    }
+}
+
+async function runCommands(node: any, line: string, mode: RunMode): Promise<RunResult> {
+    const redirectStdout = mode === RunMode.RunSubshell;
+
+    let data: RunResult;
+    const bufs: Buffer[] = [];
+    if (redirectStdout) {
+        data = {
+            status: undefined,
+            stdout: undefined
+        };
+    }
+
+    for (let i = 0; i < node.length; ++i) {
+        const subresult = await runCommand(node[i], line, mode);
+        if (redirectStdout) {
+            assert(typeof data === "object");
+            assert(typeof subresult === "object");
+            data.status = subresult.status;
+            if (subresult.stdout) {
+                bufs.push(subresult.stdout);
+            }
+        } else {
+            assert(typeof subresult !== "object");
+            data = subresult;
+        }
+    }
+
+    if (redirectStdout && bufs.length > 0) {
+        assert(typeof data === "object");
+        data.stdout = Buffer.concat(bufs);
+    }
+
+    return data;
+}
+
+async function runCondition(node: any, line: string, mode: RunMode): Promise<boolean> {
+    if (node.type !== "condition") {
+        throw new Error(`Condition is not of type condition: ${node.type}`);
+    }
+
+    const trueish = (status: number | undefined) => {
+        return status === 0;
+    };
+
+    const cond = node.condition;
+    // cond is an array, first node is the first condition.
+    // if there are more elements of the array then the elements are objects with an operator and condition property
+    let status = await runConditionCommand(cond[0], line, mode);
+    let ret = trueish(status);
+    if (cond.length === 1) {
+        return ret;
+    }
+    // these execute in left to right order, meaning
+    // 1. (true || false && true) returns true (and doesn't execute anything beyond the || operator
+    // 2. (false && true || true) returns false (and doesn't execute anything beyond the || operator
+    for (let i = 1; i < cond.length; ++i) {
+        switch (cond[i].operator) {
+        case "and":
+            if (ret === false)
+                return ret;
+            status = await runConditionCommand(cond[i].condition, line, mode);
+            ret = trueish(status);
+            if (ret === false)
+                return ret;
+            break;
+        case "or":
+            if (ret === true)
+                return ret;
+            status = await runConditionCommand(cond[i].condition, line, mode);
+            ret = trueish(status);
+            if (ret === true)
+                return ret;
+            break;
+        default:
+            throw new Error(`Invalid operator ${cond[i].operator}`);
+        }
+    }
+    return ret;
+}
+
 async function runIfNode(node: any, line: string, mode: RunMode): Promise<RunResult> {
+    const ifnode = node.if;
+    let done = false;
+
+    let status = await runCondition(ifnode[0], line, mode);
+    if (status === true) {
+        return await runCommands(ifnode[1], line, mode);
+    }
+    if (node.elif !== undefined) {
+        const elifnode = node.elif;
+        for (let i = 0; i < elifnode.length; i += 2) {
+            status = await runCondition(elifnode[i], line, mode);
+            if (status === true) {
+                return await runCommands(elifnode[i + 1], line, mode);
+            }
+        }
+    }
+    if (node.else !== undefined) {
+        return await runCommands(node.else, line, mode);
+    }
     return undefined;
 }
 
@@ -117,7 +273,7 @@ async function runJSNode(node: any, line: string, mode: RunMode): Promise<RunRes
         await Readline.pause();
         try {
             const data = await runJS(node, line, { redirectStdin: false, redirectStdout: false });
-            ret = await data.promise;
+            ret = await data.status;
         } catch (e) {
             console.error(e);
             return undefined;
@@ -134,7 +290,7 @@ async function runJSNode(node: any, line: string, mode: RunMode): Promise<RunRes
                     bufs.push(buf);
                 }
             }
-            const status = await data.promise;
+            const status = await data.status;
             return {
                 status: status,
                 stdout: bufs.length === 0 ? undefined : Buffer.concat(bufs)
