@@ -79,7 +79,7 @@ function handlePauseRl(cmd: string, args: string[]) {
     });
 }
 
-enum RunMode { RunNormal, RunSubshell };
+enum RunMode { RunNormal, RunCapture };
 type RunResult = number | SubshellResult | undefined;
 
 async function runSepNode(node: any, line: string, mode: RunMode) {
@@ -104,7 +104,7 @@ async function runSepNode(node: any, line: string, mode: RunMode) {
 }
 
 async function runConditionCommand(node: any, line: string, mode: RunMode): Promise<number | undefined> {
-    const redirectStdout = mode === RunMode.RunSubshell;
+    const redirectStdout = mode === RunMode.RunCapture;
     switch (node.type) {
     case "cmd": {
         const data = await runCmd(node, line, { redirectStdin: false, redirectStdout: redirectStdout, redirectStderr: false, interactive: undefined });
@@ -122,7 +122,7 @@ async function runConditionCommand(node: any, line: string, mode: RunMode): Prom
 }
 
 async function runCommand(node: any, line: string, mode: RunMode): Promise<RunResult> {
-    const redirectStdout = mode === RunMode.RunSubshell;
+    const redirectStdout = mode === RunMode.RunCapture;
 
     const createReturnValue = async (data: CmdResult | SubshellResult) => {
         if (redirectStdout) {
@@ -161,7 +161,7 @@ async function runCommand(node: any, line: string, mode: RunMode): Promise<RunRe
 }
 
 async function runCommands(node: any, line: string, mode: RunMode): Promise<RunResult> {
-    const redirectStdout = mode === RunMode.RunSubshell;
+    const redirectStdout = mode === RunMode.RunCapture;
 
     let data: RunResult;
     const bufs: Buffer[] = [];
@@ -272,7 +272,7 @@ async function runASTNode(node: any, line: string, mode: RunMode): Promise<RunRe
     }
 
     let result: RunResult;
-    if (mode === RunMode.RunSubshell) {
+    if (mode === RunMode.RunCapture) {
         result = {
             status: undefined,
             stdout: undefined
@@ -282,7 +282,7 @@ async function runASTNode(node: any, line: string, mode: RunMode): Promise<RunRe
     const append = (newresult: RunResult) => {
         if (newresult === undefined)
             return;
-        if (mode === RunMode.RunSubshell) {
+        if (mode === RunMode.RunCapture) {
             assert(typeof result === "object");
             assert(typeof newresult !== "number");
             result.status = newresult.status;
@@ -380,7 +380,7 @@ process.on("unhandledRejection", (reason, promise) => {
             const parser = new nearley.Parser(nearley.Grammar.fromCompiled(jsh3_grammar));
             parser.feed(cmdline);
             if (parser.results) {
-                const data = await runASTNode(parser.results, cmdline, RunMode.RunSubshell);
+                const data = await runASTNode(parser.results, cmdline, RunMode.RunCapture);
                 if (data !== undefined) {
                     assert(typeof data !== "number");
                     return data;
