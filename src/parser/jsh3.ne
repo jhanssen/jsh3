@@ -291,15 +291,39 @@ function extractJSCode(d: any) {
            };
 }
 
+function extractCondition(d: any) {
+    const elementify = (n: any) => {
+        while (n instanceof Array && n.length === 1) {
+            n = n[0];
+        }
+        return n;
+    };
+    const operatorify = (o: any) => {
+        switch (o.type) {
+        case "and":
+        case "or":
+            return o.type;
+        default:
+            throw new Error(`Invalid operator ${o.type}`);
+        }
+    };
+    const conds = [];
+    conds.push(elementify(d[0]));
+    for (let i = 1; i < d.length; i += 2) {
+        // i + 0 is the operator, i + 1 is the element
+        conds.push({ operator: operatorify(d[i][0]), condition: elementify(d[i + 1]) });
+    }
+    return conds;
+}
+
 function extractElIf(d: any) {
     const o: any[] = [];
     const helper = (sub: any) => {
         if (!sub)
             return;
-        const elifEntry = [];
-        elifEntry.push({ type: "condition", condition: sub[2] });
-        elifEntry.push(sub[8]);
-        o.push({ type: "elifEntry", elifEntry: elifEntry });
+
+        o.push({ type: "condition", condition: extractCondition(sub[2]) });
+        o.push(sub[8]);
 
         if (sub[9] instanceof Array && sub[9].length > 0) {
             helper(sub[9][1]);
@@ -311,7 +335,7 @@ function extractElIf(d: any) {
 
 function extractIf(d: any) {
     const ifentries = [];
-    ifentries.push({ type: "condition", condition: d[2] }); // condition
+    ifentries.push({ type: "condition", condition: extractCondition(d[2]) }); // condition
     ifentries.push(d[8]); // body
     let elifentries: any[] | undefined = undefined;
     if (d[9] instanceof Array && d[9].length > 0) {
@@ -319,7 +343,7 @@ function extractIf(d: any) {
     }
     let elseentries: any[] | undefined = undefined;
     if (d[10] instanceof Array && d[10].length > 0) {
-        elseentries = d[10][0][3];
+        elseentries = d[10][3][0];
     }
 
     return { type: "if", if: ifentries, elif: elifentries, else: elseentries, redirs: d[11] };
@@ -327,7 +351,7 @@ function extractIf(d: any) {
 
 function extractWhile(d: any) {
     const entries = [];
-    entries.push({ type: "condition", condition: d[2] }); // condition
+    entries.push({ type: "condition", condition: extractCondition(d[2]) }); // condition
     entries.push(d[8]); // body
     return { type: "while", while: entries, redirs: d[11] };
 }
