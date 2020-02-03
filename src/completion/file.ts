@@ -3,7 +3,7 @@ import { promisify } from "util";
 import { stat, readdir } from "fs";
 import { Completion as ReadlineCompletion } from "../../native/readline";
 import { top } from "../variable";
-import { commands as internalCommands } from "../commands";
+import { builtinCommands, declaredCommands } from "../commands";
 import { finalize } from "./simple";
 import * as utils from "../utils";
 
@@ -39,7 +39,10 @@ function fillGlobalExecutablesFromPath(path: string) {
 
 function fillGlobalExecutables() {
     // add internal commands
-    cache.globalExecutables = Object.keys(internalCommands);
+    cache.globalExecutables = Object.keys(builtinCommands).concat(Object.keys(declaredCommands))
+        .filter((value, index, self) => {
+            return self.indexOf(value) === index;
+        });
 
     // traverse PATH
     const path = top().PATH;

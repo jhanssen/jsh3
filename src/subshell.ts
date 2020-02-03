@@ -3,8 +3,9 @@ import { Readable, Writable, Duplex } from "stream";
 import { pathify } from "./utils";
 import { expand } from "./expand";
 import { env as envGet, push as envPush, pop as envPop, EnvType } from "./variable";
-import { commands as internalCommands } from "./commands";
+import { declaredCommands, builtinCommands } from "./commands";
 import { parseRedirections } from "./redirs";
+import { assert } from "./assert";
 import { runInNewContext } from "vm";
 import { format as consoleFormat } from "util";
 
@@ -15,6 +16,70 @@ export interface CmdResult
     stdin: Writable | undefined;
     stdout: Readable | undefined;
     status: Promise<number | undefined>;
+}
+
+type GeneratorResolveFunction = (value: number | undefined | PromiseLike<number | undefined>) => void;
+
+function runGeneratorCommand(generator: AsyncIterable<Buffer | string | number>): CmdResult {
+    let resolve: GeneratorResolveFunction | undefined;
+    let reject: RejectFunction | undefined;
+    const promise = new Promise<number | undefined>((newResolve, newReject) => {
+        resolve = newResolve;
+        reject = newReject;
+    });
+    assert(resolve !== undefined && reject !== undefined);
+
+    const stdout = new ShellReader();
+
+    (async () => {
+        let status: number | undefined;
+        try {
+            for await (const item of generator) {
+                switch (typeof item) {
+                case "undefined":
+                    continue;
+                case "number":
+                    status = item;
+                    break;
+                case "string":
+                    if (status !== undefined) {
+                        stdout.write(Buffer.from(status + "\n"));
+                        status = undefined;
+                    }
+                    stdout.write(Buffer.from(item + "\n"));
+                    break;
+                case "object":
+                    if (item instanceof Buffer) {
+                        if (status !== undefined) {
+                            stdout.write(Buffer.from(status + "\n"));
+                            status = undefined;
+                        }
+                        stdout.write(item);
+                    }
+                    // fall through
+                default:
+                    if (status !== undefined) {
+                        stdout.write(Buffer.from(status + "\n"));
+                        status = undefined;
+                    }
+                    stdout.write(Buffer.from(item.toString()));
+                    break;
+                }
+            }
+        } catch (e) {
+            stdout.end();
+            reject(e);
+            return;
+        }
+        stdout.end();
+        resolve(status || 0);
+    })();
+
+    return {
+        stdin: undefined,
+        stdout: stdout,
+        status: promise
+    };
 }
 
 export async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<{ pid: number, result: CmdResult }> {
@@ -43,16 +108,13 @@ export async function runCmd(cmds: any, source: string, opts: ProcessOptions): P
             throw new Error(`No cmd`);
         }
 
-        if (cmd in internalCommands) {
-            const internalCmd = internalCommands[cmd as keyof typeof internalCommands];
-            return {
-                pid: -1,
-                result: {
-                    stdin: undefined,
-                    stdout: undefined,
-                    status: internalCmd(args, env)
-                }
-            };
+        if (cmd in declaredCommands.commands) {
+            const declared = declaredCommands.commands[cmd];
+            return { pid: -1, result: runGeneratorCommand(declared(args, env)) };
+        }
+        if (cmd in builtinCommands) {
+            const builtin = builtinCommands[cmd as keyof typeof builtinCommands];
+            return { pid: -1, result: runGeneratorCommand(builtin(args, env)) };
         }
 
         const rcmd = await pathify(cmd);
