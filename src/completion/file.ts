@@ -39,7 +39,7 @@ function fillGlobalExecutablesFromPath(path: string) {
 
 function fillGlobalExecutables() {
     // add internal commands
-    cache.globalExecutables = Object.keys(builtinCommands).concat(Object.keys(declaredCommands))
+    cache.globalExecutables = Object.keys(builtinCommands).concat(Object.keys(declaredCommands.commands))
         .filter((value, index, self) => {
             return self.indexOf(value) === index;
         });
