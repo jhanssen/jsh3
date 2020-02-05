@@ -338,7 +338,7 @@ void Reader::start(const Napi::Env& env)
                           Napi::HandleScope scope(env);
                           Napi::CallbackScope callback(env, p->callback->ctx);
 
-                          p->callback->function.Call({ Napi::String::New(env, "stopped") });
+                          p->callback->function.Call({ Napi::String::New(env, "stopped"), Napi::Number::New(env, p->status) });
                       }
                       for (const auto& p : ep) {
                           auto env = p->callback->ctx.Env();
@@ -523,11 +523,16 @@ void Reader::handleSigChld()
                 MutexLocker locker(&mutex);
                 tcgetattr(STDIN_FILENO, &proc->tmodes);
                 proc->tmodesSaved = true;
+                proc->status = WSTOPSIG(status);
                 stoppedprocs.push_back(proc);
                 uv_async_send(&async);
             } else {
                 proc->running = false;
-                proc->status = status;
+                if (WIFSIGNALED(status)) {
+                    proc->status = -WTERMSIG(status);
+                } else {
+                    proc->status = WEXITSTATUS(status);
+                }
                 if (proc->stdout == -1 && proc->stderr == -1) {
                     // all done, notify js
                     MutexLocker locker(&mutex);
@@ -823,6 +828,9 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
         const pid_t pgid = opts.pgid > 0 ? opts.pgid : pid;
         if (opts.interactive) {
             setpgid(pid, pgid);
+            if (opts.foreground) {
+                tcsetpgrp(STDIN_FILENO, pgid);
+            }
         }
 
         if (opts.redirectStdin) {

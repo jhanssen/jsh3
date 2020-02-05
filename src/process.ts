@@ -114,7 +114,7 @@ export class Process extends EventEmitter
                 }
                 break;
             case "stopped":
-                this.emit("stopped", this);
+                this.emit("stopped", { status: status as number, process: this });
                 break;
             case "exited":
                 this.emit("exited", { status: status as number, process: this });

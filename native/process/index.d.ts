@@ -58,4 +58,38 @@ declare namespace Native
     ): Launch;
 }
 
+export enum Signals {
+    SIGHUP = 1,
+    SIGINT,
+    SIGQUIT,
+    SIGILL,
+    SIGTRAP,
+    SIGABRT,
+    SIGEMT,
+    SIGFPE,
+    SIGKILL,
+    SIGBUS,
+    SIGSEGV,
+    SIGSYS,
+    SIGPIPE,
+    SIGALRM,
+    SIGTERM,
+    SIGURG,
+    SIGSTOP,
+    SIGTSTP,
+    SIGCONT,
+    SIGCHLD,
+    SIGTTIN,
+    SIGTTOU,
+    SIGIO,
+    SIGXCPU,
+    SIGXFSZ,
+    SIGVTALRM,
+    SIGPROF,
+    SIGWINCH,
+    SIGINFO,
+    SIGUSR1,
+    SIGUSR2
+}
+
 export default Native;

@@ -192,12 +192,36 @@ class Pipe
     async execute(): Promise<number | undefined> {
         // launch all processes, then pipe their inputs / outputs
         const all: CmdResult[] = [];
-        const foreground = (typeof this._opts.foreground === "boolean") ? this._opts.foreground : true;
+        const pnum = this._pipes.length;
+
+        let foreground = (typeof this._opts.foreground === "boolean") ? this._opts.foreground : true;
+
+        if (foreground) {
+            for (let i = 0; i < pnum; ++i) {
+                const p = this._pipes[i];
+                if (p.amp === true) {
+                    foreground = false;
+                    break;
+                }
+            }
+        }
+
         this._job = new Job(foreground);
         jobs.add(this._job);
 
         this._job.on("finished", () => {
             if (this._job) {
+                if (!this._job.foreground) {
+                    let idx = 0;
+                    for (const job of jobs) {
+                        ++idx;
+                        if (job === this._job) {
+                            console.log(`[${idx}]: (done) ${job.name}`);
+                            break;
+                        }
+                    }
+                }
+
                 jobs.delete(this._job);
             }
         });
@@ -222,7 +246,6 @@ class Pipe
 
         let source: Readable | undefined = firstSource;
         let pgid = this._opts.pgid;
-        const pnum = this._pipes.length;
         for (let i = 0; i < pnum; ++i) {
             const p = this._pipes[i];
             switch (p.type) {

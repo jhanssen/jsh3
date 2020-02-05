@@ -49,8 +49,8 @@ export class Job extends EventEmitter
             this._name = proc.name;
         }
 
-        proc.on("stopped", (p: Process) => {
-            const idx = this._procs.indexOf(p);
+        proc.on("stopped", (p: { status: number, process: Process }) => {
+            const idx = this._procs.indexOf(p.process);
             if (idx === -1) {
                 throw new Error(`Stopped process that doesn't exist`);
             }
@@ -62,10 +62,10 @@ export class Job extends EventEmitter
                 if (this._foreground) {
                     Shell.restore();
                     Readline.resume().then(() => {
-                        this.emit("stopped");
+                        this.emit("stopped", p.status);
                     });
                 } else {
-                    this.emit("stopped");
+                    this.emit("stopped", p.status);
                 }
             }
         });
