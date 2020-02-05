@@ -1,5 +1,6 @@
 export interface InCtx {}
 export interface OutCtx {}
+export interface ProcessCtx {}
 
 export type StatusOn = "exited" | "stopped" | "error";
 
@@ -9,6 +10,8 @@ export interface Launch
     write: (ctx: InCtx, buffer?: Buffer) => void;
     close: (ctx: InCtx) => void;
     listen: (ctx: OutCtx, listener: (buffer: Buffer) => void) => void;
+    setMode: (ctx: ProcessCtx, mode: "foreground" | "background", resume: boolean) => void;
+    processCtx: ProcessCtx;
     stdoutCtx?: OutCtx;
     stderrCtx?: OutCtx;
     stdinCtx?: InCtx;

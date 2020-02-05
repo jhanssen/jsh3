@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/select.h>
 #include <sys/wait.h>
+#include <termios.h>
 
 struct AsyncFunction
 {
@@ -87,11 +88,13 @@ struct Process
 
     int stdin;
     int stdout, stderr;
-    pid_t pid;
+    pid_t pid, pgid;
     int status { -1 };
     bool running { false };
     bool needsWrite { false };
     bool pendingClose { false };
+    bool tmodesSaved { false };
+    termios tmodes;
 
     std::unique_ptr<AsyncFunction> callback;
 
@@ -105,6 +108,31 @@ struct Process
     std::deque<std::string> pendingWrite;
     size_t pendingOffset { 0 };
 };
+
+enum ProcessMode {
+    ProcessForeground = 0x1,
+    ProcessBackground = 0x2,
+    ProcessResume = 0x4
+};
+
+static void setProcessMode(const std::shared_ptr<Process>& proc, uint32_t mode)
+{
+    if (mode & ProcessForeground) {
+        tcsetpgrp(STDIN_FILENO, proc->pgid);
+        if (mode & ProcessResume) {
+            if (proc->tmodesSaved) {
+                tcsetattr(STDIN_FILENO, TCSADRAIN, &proc->tmodes);
+                // proc->tmodesSaved = false;
+            }
+            kill(-proc->pgid, SIGCONT);
+        }
+    } else {
+        assert(mode & ProcessBackground);
+        if (mode & ProcessResume) {
+            kill(-proc->pgid, SIGCONT);
+        }
+    }
+}
 
 struct Reader
 {
@@ -493,6 +521,8 @@ void Reader::handleSigChld()
             if (WIFSTOPPED(status)) {
                 // process suspended, notify js
                 MutexLocker locker(&mutex);
+                tcgetattr(STDIN_FILENO, &proc->tmodes);
+                proc->tmodesSaved = true;
                 stoppedprocs.push_back(proc);
                 uv_async_send(&async);
             } else {
@@ -568,6 +598,40 @@ void Close(const Napi::CallbackInfo& info)
     int e;
     char c = 'w';
     EINTRWRAP(e, ::write(reader.wakeuppipe[1], &c, 1));
+}
+
+Napi::Value SetMode(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    if (!info[0].IsObject()) {
+        throw Napi::TypeError::New(env, "First argument needs to be a ctx");
+    }
+
+    auto proc = Wrap<std::shared_ptr<Process> >::unwrap(info[0]);
+    if (!proc) {
+        throw Napi::TypeError::New(env, "First argument is not a ctx");
+    }
+
+    if (!info[1].IsString()) {
+        throw Napi::TypeError::New(env, "Second argument needs to be an string");
+    }
+    auto mode = info[1].As<Napi::String>().Utf8Value();
+
+    if (!info[2].IsBoolean()) {
+        throw Napi::TypeError::New(env, "Third argument needs to be a bool");
+    }
+    auto resume = info[2].As<Napi::Boolean>().Value();
+
+    if (mode == "foreground") {
+        setProcessMode(proc, ProcessForeground | (resume ? ProcessResume : 0));
+    } else if (mode == "background") {
+        setProcessMode(proc, ProcessBackground | (resume ? ProcessResume : 0));
+    } else {
+        throw Napi::TypeError::New(env, "Invalid mode, must be 'foreground' or 'background'");
+    }
+
+    return env.Undefined();
 }
 
 void Listen(const Napi::CallbackInfo& info)
@@ -756,8 +820,8 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
     } else if (pid > 0) {
         // parent
 
+        const pid_t pgid = opts.pgid > 0 ? opts.pgid : pid;
         if (opts.interactive) {
-            const pid_t pgid = opts.pgid > 0 ? opts.pgid : pid;
             setpgid(pid, pgid);
         }
 
@@ -843,6 +907,7 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             }
 
             proc->pid = pid;
+            proc->pgid = pgid;
             proc->running = true;
 
             if (opts.redirectStderr) {
@@ -870,11 +935,13 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             if (opts.redirectStdin) {
                 obj.Set("stdinCtx", Wrap<std::shared_ptr<Process::Writer> >::wrap(env, proc->writer));
             }
+            obj.Set("processCtx", Wrap<std::shared_ptr<Process> >::wrap(env, proc));
         }
         obj.Set("listen", Napi::Function::New(env, Listen));
         obj.Set("write", Napi::Function::New(env, Write));
         obj.Set("close", Napi::Function::New(env, Close));
         obj.Set("pid", Napi::Number::New(env, pid));
+        obj.Set("setMode", Napi::Function::New(env, SetMode));
 
         return obj;
     } else {

@@ -1,4 +1,6 @@
 import { ReadProcess, Process, ProcessOptions, StatusResolveFunction, RejectFunction } from "./process";
+import { Job } from "./job";
+import { jobs } from "./jobs";
 import { Readable, Writable, Duplex } from "stream";
 import { pathify } from "./utils";
 import { expand } from "./expand";
@@ -6,6 +8,8 @@ import { env as envGet, push as envPush, pop as envPop, EnvType } from "./variab
 import { declaredCommands, builtinCommands, CommandFunction } from "./commands";
 import { parseRedirections } from "./redirs";
 import { assert } from "./assert";
+import { default as Readline } from "../native/readline";
+import { default as Shell } from "../native/shell";
 import { runInNewContext } from "vm";
 import { format as consoleFormat } from "util";
 
@@ -102,7 +106,7 @@ function runGeneratorCommand(command: CommandFunction, args: string[], env: EnvT
     };
 }
 
-export async function runCmd(cmds: any, source: string, opts: ProcessOptions): Promise<{ pid: number, result: CmdResult }> {
+export async function runCmd(cmds: any, source: string, opts: ProcessOptions, job?: Job): Promise<{ pid: number, result: CmdResult }> {
     envPush();
 
     try {
@@ -137,8 +141,16 @@ export async function runCmd(cmds: any, source: string, opts: ProcessOptions): P
             return { pid: -1, result: runGeneratorCommand(builtin, args, env, opts) };
         }
 
+        if (job && !job.valid && job.foreground) {
+            await Readline.pause();
+        }
+
         const rcmd = await pathify(cmd);
         const proc = new Process(rcmd, args, env, opts, parseRedirections(cmds.redirs));
+
+        if (job) {
+            job.addProcess(proc);
+        }
 
         envPop();
 
@@ -161,12 +173,14 @@ interface SubshellOptions
     readable?: ShellReader;
     writable?: ShellWriter;
     pgid?: number;
+    foreground?: boolean;
 }
 
 class Pipe
 {
     private _pipes: any;
     private _source: string;
+    private _job: Job | undefined;
     private _opts: SubshellOptions;
 
     constructor(pipes: any, source: string, opts: SubshellOptions) {
@@ -178,6 +192,15 @@ class Pipe
     async execute(): Promise<number | undefined> {
         // launch all processes, then pipe their inputs / outputs
         const all: CmdResult[] = [];
+        const foreground = (typeof this._opts.foreground === "boolean") ? this._opts.foreground : true;
+        this._job = new Job(foreground);
+        jobs.add(this._job);
+
+        this._job.on("finished", () => {
+            if (this._job) {
+                jobs.delete(this._job);
+            }
+        });
 
         // if we have an existing subshell readable, that should be the destination of our last entry in the pipe chain
         const finalDestination: Writable | undefined = this._opts.readable;
@@ -209,10 +232,10 @@ class Pipe
                     redirectStdout : i < pnum - 1 || finalDestination !== undefined,
                     redirectStderr: false,
                     interactive: {
-                        foreground: true,
+                        foreground: foreground,
                         pgid: pgid
                     }
-                });
+                }, this._job);
                 pgid = cmdr.pid;
                 all.push(cmdr.result);
                 break;
@@ -285,6 +308,13 @@ class Pipe
 
         // resolve with the exit code of the last pipe entry
         return results[results.length - 1];
+    }
+
+    async finalize(): Promise<void> {
+        if (this._job && this._job.valid && this._job.foreground) {
+            Shell.restore();
+            await Readline.resume();
+        }
     }
 }
 
@@ -396,7 +426,9 @@ async function pipe(cmds: any, source: string, opts: SubshellOptions): Promise<n
         throw new Error(`Invalid logical type ${cmds.type}`);
     }
     const pipes = new Pipe(cmds.pipe, source, opts);
-    return await pipes.execute();
+    const data = await pipes.execute();
+    await pipes.finalize();
+    return data;
 }
 
 async function logical(cmds: any, source: string, opts: SubshellOptions): Promise<number | undefined> {

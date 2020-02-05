@@ -86,14 +86,11 @@ type RunResult = number | SubshellResult | undefined;
 async function runSepNode(node: any, line: string, mode: RunMode) {
     let data: RunResult;
     if (mode === RunMode.RunNormal) {
-        await Readline.pause();
         try {
             data = await runSeparators(node, line);
         } catch (e) {
             console.error(e);
         }
-        Shell.restore();
-        await Readline.resume();
     } else {
         try {
             data = await runSubshell(node, line);

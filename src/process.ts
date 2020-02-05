@@ -8,6 +8,7 @@ import {
     Redirection as NativeProcessRedirection
 } from "../native/process";
 
+import { EventEmitter } from "events";
 import { Readable, Writable } from "stream";
 
 export type StatusResolveFunction = (value?: number | undefined | PromiseLike<number | undefined>) => void;
@@ -87,14 +88,19 @@ class ProcessReader extends Readable
     }
 }
 
-export class Process
+export class Process extends EventEmitter
 {
     private _launch: NativeProcessLaunch;
     private _status: Promise<number | undefined>;
     private _statusResolve: StatusResolveFunction | undefined;
     private _statusReject: RejectFunction | undefined;
+    private _name: string;
 
     constructor(cmd: string, args?: string[], env?: {[key: string]: string | undefined}, opts?: NativeProcessOptions, redirs?: NativeProcessRedirection[]) {
+        super();
+
+        this._name = cmd;
+
         this._status = new Promise<number | undefined>((resolve, reject) => {
             this._statusResolve = resolve;
             this._statusReject = reject;
@@ -102,17 +108,26 @@ export class Process
         this._launch = NativeProcess.launch(cmd, args, env, (type: NativeProcessStatusOn, status?: number | string) => {
             switch (type) {
             case "error":
+                this.emit("error", status as string);
                 if (this._statusReject) {
                     this._statusReject(status);
                 }
                 break;
+            case "stopped":
+                this.emit("stopped", this);
+                break;
             case "exited":
+                this.emit("exited", { status: status as number, process: this });
                 if (this._statusResolve) {
                     this._statusResolve(status as number);
                     break;
                 }
             }
         }, opts, redirs);
+    }
+
+    get name() {
+        return this._name;
     }
 
     get status() {
@@ -145,6 +160,14 @@ export class Process
             return this._launch.pid;
         }
         throw new Error("Invalid process");
+    }
+
+    setForeground(resume?: boolean) {
+        this._launch.setMode(this._launch.processCtx, "foreground", resume || false);
+    }
+
+    setBackground(resume?: boolean) {
+        this._launch.setMode(this._launch.processCtx, "background", resume || false);
     }
 
     closeStdin() {
