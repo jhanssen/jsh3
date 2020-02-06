@@ -181,7 +181,19 @@ export class Process extends EventEmitter
     }
 }
 
-export function signalReason(signal: number) {
+export function stopReason(signal: number) {
+    switch (signal) {
+    case NativeProcessSignals.SIGSTOP:
+        return "(signal)";
+    case NativeProcessSignals.SIGTTIN:
+        return "(tty input)";
+    case NativeProcessSignals.SIGTTOU:
+        return "(tty output)";
+    }
+    return "";
+}
+
+export function signalName(signal: number) {
     switch (signal) {
     case NativeProcessSignals.SIGHUP:
         return "SIGHUP";

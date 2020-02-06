@@ -1,4 +1,4 @@
-import { Process, ProcessOptions, StatusResolveFunction, RejectFunction, signalReason } from "./process";
+import { Process, ProcessOptions, StatusResolveFunction, RejectFunction, stopReason } from "./process";
 import { Job } from "./job";
 import { jobs } from "./jobs";
 import { Readable, Writable, Duplex } from "stream";
@@ -218,7 +218,7 @@ class Pipe
                 if (j.stopped) {
                     ++idx;
                     if (j === this._job) {
-                        console.log(`[${idx}]: suspended (${signalReason(sig)})`);
+                        console.log(`[${idx}]: suspended ${stopReason(sig)}`);
                         return;
                     }
                 }
