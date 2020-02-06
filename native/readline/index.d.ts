@@ -34,6 +34,7 @@ declare namespace Native
     export function addHistory(line: string, write?: boolean): Promise<void>;
     export function writeHistory(file: string): Promise<void>;
     export function readHistory(file: string): Promise<void>;
+    export function realFDs(): { stdout: number, stderr: number };
     export const log: Log;
 }
 

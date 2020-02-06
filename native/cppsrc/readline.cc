@@ -832,6 +832,16 @@ void Error(const Napi::CallbackInfo& info)
     LogToFile(state.redirector.stderrFile(), info);
 }
 
+Napi::Value RealFDs(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+
+    auto obj = Napi::Object::New(env);
+    obj.Set("stdout", Napi::Number::New(env, state.redirector.realStdout()));
+    obj.Set("stderr", Napi::Number::New(env, state.redirector.realStderr()));
+    return obj;
+}
+
 Napi::Object Setup(Napi::Env env, Napi::Object exports)
 {
     exports.Set("start", Napi::Function::New(env, Start));
@@ -840,6 +850,7 @@ Napi::Object Setup(Napi::Env env, Napi::Object exports)
     exports.Set("quiet", Napi::Function::New(env, Quiet));
     exports.Set("resume", Napi::Function::New(env, Resume));
     exports.Set("clear", Napi::Function::New(env, Clear));
+    exports.Set("realFDs", Napi::Function::New(env, RealFDs));
     exports.Set("setPrompt", Napi::Function::New(env, SetPrompt));
     exports.Set("addHistory", Napi::Function::New(env, AddHistory));
     exports.Set("readHistory", Napi::Function::New(env, ReadHistory));

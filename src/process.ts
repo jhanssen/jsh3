@@ -5,7 +5,8 @@ import {
     OutCtx as NativeProcessOut,
     Options as NativeProcessOptions,
     StatusOn as NativeProcessStatusOn,
-    Redirection as NativeProcessRedirection
+    Redirection as NativeProcessRedirection,
+    Signals as NativeProcessSignals
 } from "../native/process";
 
 import { EventEmitter } from "events";
@@ -96,7 +97,7 @@ export class Process extends EventEmitter
     private _statusReject: RejectFunction | undefined;
     private _name: string;
 
-    constructor(cmd: string, args?: string[], env?: {[key: string]: string | undefined}, opts?: NativeProcessOptions, redirs?: NativeProcessRedirection[]) {
+    constructor(cmd: string, args: string[], env: {[key: string]: string | undefined}, opts: NativeProcessOptions, redirs?: NativeProcessRedirection[]) {
         super();
 
         this._name = cmd;
@@ -180,54 +181,70 @@ export class Process extends EventEmitter
     }
 }
 
+export function signalReason(signal: number) {
+    switch (signal) {
+    case NativeProcessSignals.SIGHUP:
+        return "SIGHUP";
+    case NativeProcessSignals.SIGINT:
+        return "SIGINT";
+    case NativeProcessSignals.SIGQUIT:
+        return "SIGQUIT";
+    case NativeProcessSignals.SIGILL:
+        return "SIGILL";
+    case NativeProcessSignals.SIGTRAP:
+        return "SIGTRAP";
+    case NativeProcessSignals.SIGABRT:
+        return "SIGABRT";
+    case NativeProcessSignals.SIGEMT:
+        return "SIGEMT";
+    case NativeProcessSignals.SIGFPE:
+        return "SIGFPE";
+    case NativeProcessSignals.SIGKILL:
+        return "SIGKILL";
+    case NativeProcessSignals.SIGBUS:
+        return "SIGBUS";
+    case NativeProcessSignals.SIGSEGV:
+        return "SIGSEGV";
+    case NativeProcessSignals.SIGSYS:
+        return "SIGSYS";
+    case NativeProcessSignals.SIGPIPE:
+        return "SIGPIPE";
+    case NativeProcessSignals.SIGALRM:
+        return "SIGALRM";
+    case NativeProcessSignals.SIGTERM:
+        return "SIGTERM";
+    case NativeProcessSignals.SIGURG:
+        return "SIGURG";
+    case NativeProcessSignals.SIGSTOP:
+        return "SIGSTOP";
+    case NativeProcessSignals.SIGTSTP:
+        return "SIGTSTP";
+    case NativeProcessSignals.SIGCONT:
+        return "SIGCONT";
+    case NativeProcessSignals.SIGCHLD:
+        return "SIGCHLD";
+    case NativeProcessSignals.SIGTTIN:
+        return "SIGTTIN";
+    case NativeProcessSignals.SIGTTOU:
+        return "SIGTTOU";
+    case NativeProcessSignals.SIGIO:
+        return "SIGIO";
+    case NativeProcessSignals.SIGXCPU:
+        return "SIGXCPU";
+    case NativeProcessSignals.SIGXFSZ:
+        return "SIGXFSZ";
+    case NativeProcessSignals.SIGVTALRM:
+        return "SIGVTALRM";
+    case NativeProcessSignals.SIGPROF:
+        return "SIGPROF";
+    case NativeProcessSignals.SIGWINCH:
+        return "SIGWINCH";
+    case NativeProcessSignals.SIGINFO:
+        return "SIGINFO";
+    case NativeProcessSignals.SIGUSR1:
+        return "SIGUSR1";
+    }
+    return "unknown";
+}
+
 export { NativeProcessOptions as ProcessOptions };
-
-export interface ReadProcess {
-    status: number | undefined;
-    stdout: Buffer | undefined;
-    stderr: Buffer | undefined;
-}
-
-export function readProcess(cmd: string, args?: string[], env?: {[key: string]: string}): Promise<ReadProcess> {
-    return new Promise((resolve, reject) => {
-        const read: ReadProcess = {
-            status: 0,
-            stdout: undefined,
-            stderr: undefined
-        };
-        const launch = NativeProcess.launch(cmd, args, env, (type: NativeProcessStatusOn, status?: number | string) => {
-            switch (type) {
-            case "error":
-                reject(status);
-                break;
-            case "exited":
-                if (typeof status !== "number") {
-                    throw new Error("Status of exited must be a number");
-                }
-                read.status = status;
-                if (stdout.length > 0) {
-                    read.stdout = Buffer.concat(stdout);
-                }
-                if (stderr.length > 0) {
-                    read.stderr = Buffer.concat(stderr);
-                }
-                resolve(read);
-                break;
-            }});
-        const stdout: Buffer[] = [];
-        const stderr: Buffer[] = [];
-        if (launch.stdinCtx) {
-            launch.close(launch.stdinCtx);
-        }
-        if (launch.stdoutCtx) {
-            launch.listen(launch.stdoutCtx, (buf: Buffer) => {
-                stdout.push(buf);
-            });
-        }
-        if (launch.stderrCtx) {
-            launch.listen(launch.stderrCtx, (buf: Buffer) => {
-                stderr.push(buf);
-            });
-        }
-    });
-}

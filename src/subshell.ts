@@ -1,4 +1,4 @@
-import { ReadProcess, Process, ProcessOptions, StatusResolveFunction, RejectFunction } from "./process";
+import { Process, ProcessOptions, StatusResolveFunction, RejectFunction, signalReason } from "./process";
 import { Job } from "./job";
 import { jobs } from "./jobs";
 import { Readable, Writable, Duplex } from "stream";
@@ -21,6 +21,8 @@ export interface CmdResult
     stdout: Readable | undefined;
     status: Promise<number | undefined>;
 }
+
+export const originalFDs = { stdout: -1, stderr: -1 };
 
 type GeneratorResolveFunction = (value: number | undefined | PromiseLike<number | undefined>) => void;
 
@@ -209,6 +211,19 @@ class Pipe
         this._job = new Job(foreground);
         jobs.add(this._job);
 
+        this._job.on("stopped", (sig: number) => {
+            assert(this._job !== undefined);
+            let idx = 0;
+            for (const j of jobs) {
+                if (j.stopped) {
+                    ++idx;
+                    if (j === this._job) {
+                        console.log(`[${idx}]: suspended (${signalReason(sig)})`);
+                        return;
+                    }
+                }
+            }
+        });
         this._job.on("finished", () => {
             if (this._job) {
                 if (!this._job.foreground) {
@@ -254,6 +269,8 @@ class Pipe
                     redirectStdin: source !== undefined || i > 0,
                     redirectStdout : i < pnum - 1 || finalDestination !== undefined,
                     redirectStderr: false,
+                    originalStdout: originalFDs.stdout,
+                    originalStderr: originalFDs.stderr,
                     interactive: {
                         foreground: foreground,
                         pgid: pgid

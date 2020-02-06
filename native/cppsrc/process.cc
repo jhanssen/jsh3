@@ -30,7 +30,7 @@ struct ProcessOptions
     bool redirectStderr;
     bool interactive;
     bool foreground;
-    int pgid;
+    int pgid, originalStdout, originalStderr;
 };
 
 // this is kept in sync with index.d.ts
@@ -730,11 +730,15 @@ static Napi::Object launchProcess(const Napi::Env& env, std::shared_ptr<Process>
             EINTRWRAP(e, ::close(stdoutpipe[0]));
             EINTRWRAP(e, dup2(stdoutpipe[1], STDOUT_FILENO));
             EINTRWRAP(e, ::close(stdoutpipe[1]));
+        } else {
+            EINTRWRAP(e, dup2(opts.originalStdout, STDOUT_FILENO));
         }
         if (opts.redirectStderr) {
             EINTRWRAP(e, ::close(stderrpipe[0]));
             EINTRWRAP(e, dup2(stderrpipe[1], STDERR_FILENO));
             EINTRWRAP(e, ::close(stderrpipe[1]));
+        } else {
+            EINTRWRAP(e, dup2(opts.originalStderr, STDERR_FILENO));
         }
 
         {
@@ -1012,22 +1016,26 @@ Napi::Value Launch(const Napi::CallbackInfo& info)
     proc->callback = std::make_unique<AsyncFunction>(Napi::Persistent(info[3].As<Napi::Function>()), Napi::AsyncContext(env, "process"));
 
     ProcessOptions opts = {
-        true, true, true, false, false, -1
+        true, true, true, false, false, -1, -1, -1
     };
-    if (info[4].IsObject()) {
-        auto obj = info[4].As<Napi::Object>();
-        opts.redirectStdin = obj.Get("redirectStdin").As<Napi::Boolean>().Value();
-        opts.redirectStdout = obj.Get("redirectStdout").As<Napi::Boolean>().Value();
-        opts.redirectStderr = obj.Get("redirectStderr").As<Napi::Boolean>().Value();
-        const auto interactiveValue = obj.Get("interactive");
-        if (interactiveValue.IsObject()) {
-            const auto interactive = interactiveValue.As<Napi::Object>();
-            opts.interactive = true;
-            opts.foreground = interactive.Get("foreground").As<Napi::Boolean>().Value();
-            const auto pgid = interactive.Get("pgid");
-            if (pgid.IsNumber()) {
-                opts.pgid = pgid.As<Napi::Number>().Int32Value();
-            }
+    if (!info[4].IsObject()) {
+        throw Napi::TypeError::New(env, "Fifth argument needs to be an options object");
+    }
+
+    auto optsobj = info[4].As<Napi::Object>();
+    opts.redirectStdin = optsobj.Get("redirectStdin").As<Napi::Boolean>().Value();
+    opts.redirectStdout = optsobj.Get("redirectStdout").As<Napi::Boolean>().Value();
+    opts.redirectStderr = optsobj.Get("redirectStderr").As<Napi::Boolean>().Value();
+    opts.originalStdout = optsobj.Get("originalStdout").As<Napi::Number>().Int32Value();
+    opts.originalStderr = optsobj.Get("originalStderr").As<Napi::Number>().Int32Value();
+    const auto interactiveValue = optsobj.Get("interactive");
+    if (interactiveValue.IsObject()) {
+        const auto interactive = interactiveValue.As<Napi::Object>();
+        opts.interactive = true;
+        opts.foreground = interactive.Get("foreground").As<Napi::Boolean>().Value();
+        const auto pgid = interactive.Get("pgid");
+        if (pgid.IsNumber()) {
+            opts.pgid = pgid.As<Napi::Number>().Int32Value();
         }
     }
 

@@ -36,6 +36,8 @@ export interface Options
     redirectStdin: boolean;
     redirectStdout: boolean;
     redirectStderr: boolean;
+    originalStdout: number;
+    originalStderr: number;
     interactive: {
         foreground: boolean;
         pgid: number | undefined;
@@ -53,12 +55,12 @@ declare namespace Native
         args: string[] | undefined,
         env: {[key: string]: string | undefined} | undefined,
         callback: (type: StatusOn, status?: number | string) => void,
-        opts?: Options,
+        opts: Options,
         redirs?: Redirection[]
     ): Launch;
 }
 
-export enum Signals {
+export const enum Signals {
     SIGHUP = 1,
     SIGINT,
     SIGQUIT,

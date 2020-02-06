@@ -80,7 +80,7 @@ export class Job extends EventEmitter
             ++this._finished;
             if (this._finished === this._total) {
                 // fully finished
-                this.emit("finished");
+                this.emit("finished", p.status);
                 this._stopped = 0;
             }
         });

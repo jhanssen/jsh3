@@ -4,8 +4,7 @@ import { default as Readline, Data as ReadlineData, Completion as ReadlineComple
 import { default as Shell } from "../native/shell";
 import { default as Process } from "../native/process";
 import { complete, cache as completionCache } from "./completion";
-import { readProcess, ReadProcess } from "./process";
-import { runSeparators, runSubshell, runCmd, runJS, SubshellResult, CmdResult } from "./subshell";
+import { runSeparators, runSubshell, runCmd, runJS, SubshellResult, CmdResult, originalFDs } from "./subshell";
 import { EnvType, top as envTop } from "./variable";
 import { API } from "./api";
 import { assert } from "./assert";
@@ -105,7 +104,13 @@ async function runConditionCommand(node: any, line: string, mode: RunMode): Prom
     const redirectStdout = mode === RunMode.RunCapture;
     switch (node.type) {
     case "cmd": {
-        const data = await runCmd(node, line, { redirectStdin: false, redirectStdout: redirectStdout, redirectStderr: false, interactive: undefined });
+        const data = await runCmd(node, line, { redirectStdin: false,
+                                                redirectStdout: redirectStdout,
+                                                redirectStderr: false,
+                                                interactive: undefined,
+                                                originalStdout: originalFDs.stdout,
+                                                originalStderr: originalFDs.stderr
+                                              });
         return await data.result.status; }
     case "jscode": {
         const data = await runJS(node, line, { redirectStdin: false, redirectStdout: redirectStdout });
@@ -144,7 +149,13 @@ async function runCommand(node: any, line: string, mode: RunMode): Promise<RunRe
 
     switch (node.type) {
     case "cmd": {
-        const data = await runCmd(node, line, { redirectStdin: false, redirectStdout: redirectStdout, redirectStderr: false, interactive: undefined });
+        const data = await runCmd(node, line, { redirectStdin: false,
+                                                redirectStdout: redirectStdout,
+                                                redirectStderr: false,
+                                                interactive: undefined,
+                                                originalStdout: originalFDs.stdout,
+                                                originalStderr: originalFDs.stderr
+                                              });
         return await createReturnValue(data.result); }
     case "jscode": {
         const data = await runJS(node, line, { redirectStdin: false, redirectStdout: redirectStdout });
@@ -351,6 +362,13 @@ Readline.start(processReadline);
 Readline.readHistory(pathJoin(homedir(), ".jsh_history")).then(() => {
     console.log("history loaded", pathJoin(homedir(), ".jsh_history"));
 });
+
+(() => {
+    const fds = Readline.realFDs();
+    originalFDs.stdout = fds.stdout;
+    originalFDs.stderr = fds.stderr;
+})();
+
 Process.start();
 
 process.on("SIGINT", () => {

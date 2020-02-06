@@ -12,6 +12,9 @@ public:
     int stdout() const { return mStdout.pipe[0]; }
     int stderr() const { return mStderr.pipe[0]; }
 
+    int realStdout() const { return mStdout.real; }
+    int realStderr() const { return mStderr.real; }
+
     FILE* stdoutFile() const { return mStdout.file; }
     FILE* stderrFile() const { return mStderr.file; }
 
