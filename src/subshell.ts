@@ -12,6 +12,8 @@ import { default as Readline } from "../native/readline";
 import { default as Shell } from "../native/shell";
 import { runInNewContext } from "vm";
 import { format as consoleFormat } from "util";
+import { parse, print, types } from "recast";
+import { visit, namedTypes } from "ast-types";
 
 type VoidFunction = () => void;
 
@@ -611,6 +613,7 @@ interface Global
     stdin: Buffer | Readable | undefined
     resolve: StatusResolveFunction | undefined,
     reject: RejectFunction | undefined,
+    rewrite: (input: string) => Promise<string>;
     env: EnvType,
 
     [key: string]: any;
@@ -633,8 +636,47 @@ export async function runJS(js: any, source: string, opts: JSOptions): Promise<C
         args = await Promise.all(ps);
     }
 
+    const rewrite = async (input: string): Promise<string> => {
+        console.log("fiff", input);
+        const acorn = require("acorn");
+        const oldParse = acorn.parse;
+        acorn.parse = function(source: any, options: any) {
+            delete options.ecmaVersion;
+            return oldParse.call(this, source, options);
+        }
+        const parsed = parse(input, {
+            parser: acorn
+        });
+
+        const b = types.builders;
+
+        visit(parsed, {
+            visitYieldExpression(path) {
+                this.traverse(path);
+
+                // on the way back up, insert a new node before the yield
+                const wait = b.expressionStatement(b.awaitExpression(b.callExpression(b.identifier("hello"), [])));
+                // parent path is a expression statement
+                namedTypes.ExpressionStatement.assert(path.parentPath.value);
+
+                path.parentPath.insertBefore(wait);
+            },
+            visitReturnStatement(path) {
+                this.traverse(path);
+
+                // on the way back up, insert a new node before the return
+                const wait = b.expressionStatement(b.awaitExpression(b.callExpression(b.identifier("hello"), [])));
+                path.insertBefore(wait);
+            }
+        });
+        console.log("whey", print(parsed, { tabWidth: 2 }).code)
+
+        return input;
+    };
+
     const ctx: Global = {
         args: args || [],
+        rewrite: rewrite,
         runInNewContext: undefined,
         console: undefined,
         stdout: undefined,
@@ -737,10 +779,10 @@ export async function runJS(js: any, source: string, opts: JSOptions): Promise<C
                         console: console
                     };
                     try {
-                        const jscode = "${jscode}";
+                        const jscode = await rewrite("(async function() { ${jscode} })()");
                         // console.log('jscode', jscode, nctx.stdin);
                         assignGlobal(nctx);
-                        const ret = runInNewContext(jscode, nctx);
+                        const ret = await runInNewContext(jscode, nctx);
                         if (typeof ret === 'number') { resolve(ret); }
                         else { if (ret !== undefined) console.log(ret); resolve(0); }
                     } catch (e) {
@@ -816,7 +858,7 @@ export async function runJS(js: any, source: string, opts: JSOptions): Promise<C
                     };
                     ${assignGlobal}
                     try {
-                        const jscode = "${jscode}";
+                        const jscode = await rewrite("(async function() { ${jscode} })()");
                         const promise = new Promise((newResolve, newReject) => {
                             const nctx = {
                                 args: args,
@@ -908,7 +950,7 @@ export async function runJS(js: any, source: string, opts: JSOptions): Promise<C
                     };
                     ${assignGlobal}
                     try {
-                        const jscode = "(async function* () { ${jscode} })()";
+                        const jscode = await rewrite("(async function* () { ${jscode} })()");
                         function sleep(ms) {
                             return new Promise(resolve => setTimeout(resolve, ms));
                         }
